@@ -1,8 +1,8 @@
 Development en-route: real-time socratic bot 
 
-- PoC that a bot like this works on open source
-- Test run with whisper and ollama (llama3.1)
-	- test more alternatives 
+- ~~PoC that a bot like this works on open source~~
+- ~~Test run with whisper and ollama (llama3.1)~~
+- Test more alternatives 
 		- Voice: (fastAPI + Whisper currently) 
 		- LLM: llama 3.1 -> llama 3.3 -> Mistral ? ->?
 
