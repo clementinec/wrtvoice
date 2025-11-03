@@ -1,4 +1,6 @@
-# Real Time Whisper Transcription
+Development en-route: real-time socratic bot 
+
+~~Built Upon Real Time Whisper Transcription~~
 
 ![Demo gif](demo.gif)
 
