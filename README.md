@@ -1,6 +1,12 @@
 Development en-route: real-time socratic bot 
 
-~~Built Upon Real Time Whisper Transcription~~
+- PoC that a bot like this works on open source
+- Test run with whisper and ollama (llama3.1)
+	- test more alternatives 
+		- Voice: (fastAPI + Whisper currently) 
+		- LLM: llama 3.1 -> llama 3.3 -> Mistral ? ->?
+
+## Built Upon Real Time Whisper Transcription~~
 
 ![Demo gif](demo.gif)
 
