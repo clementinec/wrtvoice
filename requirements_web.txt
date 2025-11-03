@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+websockets
+python-multipart
+PyPDF2
+pyttsx3
+requests
+python-dotenv
+aiohttp

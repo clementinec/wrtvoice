@@ -1,0 +1,31 @@
+# Core dependencies
+setuptools
+wheel
+numpy
+requests
+
+# PyTorch (CPU version for compatibility)
+torch
+torchvision
+torchaudio
+
+# Audio processing
+pyaudio
+SpeechRecognition
+pyttsx3
+
+# Whisper (OpenAI)
+git+https://github.com/openai/whisper.git
+
+# Web framework
+fastapi
+uvicorn[standard]
+websockets
+python-multipart
+aiohttp
+
+# PDF processing
+PyPDF2
+
+# Utilities
+python-dotenv

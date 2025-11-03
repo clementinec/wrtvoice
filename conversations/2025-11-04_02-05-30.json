@@ -1,0 +1,112 @@
+{
+  "session_id": "2025-11-04_02-05-30",
+  "session_start": "2025-11-04T02:05:30.016587",
+  "session_duration_seconds": 157.592849,
+  "pdf_context": "Graphical Abstract Automated Urban Energy Assessment: From Thermal Flyover to AI-Driven Retroﬁt Prioritization for Sustainable Cities Hongshan Guo, Sebastiano Anselmo, Maria Ferrara, Shuai Niu, Binlin Chi, Xuchen Wang Highlights Automated Urban Energy Assessment: From Thermal Flyover to AI-Driven Retroﬁt Prioritization for Sustainable Cities Hongshan Guo, Sebastiano Anselmo, Maria Ferrara, Shuai Niu, Binlin Chi, Xuchen Wang •Unsupervised pipeline fuses aerial RGB and mid-IR to extract fa¸ cade thermal patches (no labels) •Thermal-ring features (ring mean, gradient, percentile) capture heat-loss patterns •CatBoost on thermal-ring features: RMSE34.4 kWh/m ²·yr, MAPE19%, EPC class accu- racy62% ( ±1b a n d 9 0 % ) •Three ring features (mean temp, gradient, 95th percentile) contribute 72% of model gain •Open-source code for EPC cleaning and segmentation enables block-level EUI estimation from aﬂ y o v e r Automated Urban Energy Assessment: From Thermal Flyover to AI-Driven Retroﬁt Prioritization for Sustainable Cities Hongshan Guoa, Sebastiano Anselmob,M a r i aF e r r a r ac, Shuai Niua,B i n l i nC h ia, Xuchen Wanga aDepartment of Architecture, Faculty of Architecture, The University of Hong Kong, Knowles Building, Hong Kong SAR, China bInteruniversity Department of Regional and Urban Studies and Planning, Politecnico di Turin, Viale Mattioli 39, Turin, Italy cDepartment of Energy, Politecnico di Turin, Corso Duca degli Abruzzi 24, Turin, Italy Abstract Cities urgently need scalable methods to assess building energy performance for retroﬁt prioriti- zation, yet current approaches are costly and slow for comprehensive urban energy planning. We present an automated pipeline that transforms thermal ﬂyovers into actionable energy assessments using AI-driven analysis. Our approach segments mid-wave infrared orthomosaics into building patches, extracts phys- ically interpretable ”thermal-ring” features, and predicts energy-use intensity (EUI) with gradi- ent boosting. Validated on 1,168 residential buildings in Turin’s post-war social housing district, our CatBoost model achieves 34.4 kWhm→2yr→1RMSE and 19% MAPE using only thermal fea- tures—matching EPC-based benchmarks without on-site data collection. Energy class accuracy reaches 62% (90% within ±1b a n d ) . Three thermal-ring metrics explain 72% of predictive power, demonstrating clear physical inter- pretability. By enabling rapid district-wide screening from single aircraft campaigns, this framework supports municipal retroﬁt prioritization and policy monitoring at unprecedented scale. Open- source code facilitates EU-wide deployment for sustainable urban energy planning. Keywords: sustainable cities, urban energy planning, thermal imagery, Energy Usage Intensity, retroﬁt prioritization, computer vision 1. Introduction Buildings account for 40% of ﬁnal energy consumption and 36% of energy-related greenhouse gas emissions worldwide, making them crucial for carbon reduction—particularly within the EU’s commitment to climate neutrality by 2050. Municipal decision-makers face mounting pressure to retroﬁt aging building stock under the EU Green Deal framework, which targets 35 million build- ings for renovation by 2030. The Energy Performance Certiﬁcate (EPC), mandated by the Energy Performance of Buildings Directive (EPBD), serves as the primary regulatory tool for energy assess- ment. However, traditional building-by-building energy audits cannot scale to comprehensive urban planning requirements. While EPCs enable energy-saving opportunities and promote low-carbon building practices, challenges persist: incomplete coverage, data quality issues",
+  "pdf_metadata": {
+    "title": "Unknown",
+    "author": "Unknown",
+    "pages": 32,
+    "filename": "Thermal_Image_Segmentation_ENE-4.pdf"
+  },
+  "conversation": [
+    {
+      "timestamp": "2025-11-04T02:05:36.020331",
+      "speaker": "bot",
+      "text": "Dear student,\n\nI've had the chance to review your essay on Graphical Abstract Automated Urban Energy Assessment. I'm eager to engage with your ideas. Could you briefly summarize, in your own words, what you see as the main thesis or central argument of this piece? How do you believe it contributes to the broader discussion on sustainable cities and urban energy planning?"
+    },
+    {
+      "timestamp": "2025-11-04T02:07:29.501044",
+      "speaker": "student",
+      "text": "So, what is happening?"
+    },
+    {
+      "timestamp": "2025-11-04T02:07:32.862728",
+      "speaker": "bot",
+      "text": "It seems we've jumped straight into a conversation without summarizing your main argument. Let's take a step back. Can you clarify what specific aspect of the Graphical Abstract Automated Urban Energy Assessment you'd like to defend or discuss? What particular claim or contribution do you think is most important, and why?"
+    },
+    {
+      "timestamp": "2025-11-04T02:07:35.665350",
+      "speaker": "student",
+      "text": "It seems we jumped straight into it."
+    },
+    {
+      "timestamp": "2025-11-04T02:07:38.223203",
+      "speaker": "bot",
+      "text": "I see what happened! We did indeed dive right in. Let's slow down a bit then. If we've \"jumped straight into it,\" that implies there might be some underlying assumptions or claims that haven't been fully articulated.\n\nCan you tell me, what exactly do you mean by \"it\" - is it the automated urban energy assessment process, the use of thermal flyovers, or something else entirely? What's the core idea you're trying to convey, and how does it relate to sustainable cities and urban planning?"
+    },
+    {
+      "timestamp": "2025-11-04T02:07:38.744394",
+      "speaker": "student",
+      "text": "conversation without summarizing it."
+    },
+    {
+      "timestamp": "2025-11-04T02:07:41.079711",
+      "speaker": "bot",
+      "text": "It seems we've come full circle. You mentioned earlier that \"we jumped straight into a conversation without summarizing your main argument.\" Now, you say \"conversation without summarizing it.\" It appears there might be some confusion or circularity in our discussion.\n\nCan you clarify what exactly is being referred to by \"it\" - the essay, the topic of automated urban energy assessment, or perhaps something else entirely? What's the specific entity that we're trying to summarize or discuss?"
+    },
+    {
+      "timestamp": "2025-11-04T02:07:45.954092",
+      "speaker": "student",
+      "text": "the sick for the"
+    },
+    {
+      "timestamp": "2025-11-04T02:07:49.081607",
+      "speaker": "bot",
+      "text": "It seems our conversation has taken another turn. I'm starting to sense a bit of confusion here. Can you help me untangle this? When you say \"the sick for the,\" what exactly do you mean by that phrase? How does it relate to your original essay topic or argument about automated urban energy assessment?\n\nAre we discussing a specific aspect of health and wellness within the context of sustainable cities, perhaps using the thermal flyover imagery as some kind of metaphor? I'm having trouble connecting the dots here. Could you shed some light on what you intended by that phrase?"
+    },
+    {
+      "timestamp": "2025-11-04T02:07:49.626893",
+      "speaker": "student",
+      "text": "Earlier that we jump straight into a conversation without summarize"
+    },
+    {
+      "timestamp": "2025-11-04T02:07:52.528038",
+      "speaker": "bot",
+      "text": "It seems we've encountered another instance of circularity in our discussion. I'd like to gently nudge you back on track.\n\nWhen you say \"Earlier that we jump straight into a conversation without summarize,\" it appears to be a repetition of previous statements rather than an advancement of your argument. Can you point to a specific aspect of your essay that relates to this phrase? What core idea or claim are you trying to convey, and how does it tie back to the automated urban energy assessment process or sustainable cities in general?"
+    },
+    {
+      "timestamp": "2025-11-04T02:07:53.133980",
+      "speaker": "student",
+      "text": "or may not get seems our conversation has taken another turn."
+    },
+    {
+      "timestamp": "2025-11-04T02:07:55.917501",
+      "speaker": "bot",
+      "text": "It seems we're experiencing a bit of a loop. Let's try to break free from this circularity and focus on the essence of your argument.\n\nCan you tell me, what specific claim or point in your essay are you trying to make about automated urban energy assessment? What unique contribution does your research bring to the field of sustainable cities?\n\nIn other words, what is the \"turn\" that our conversation has taken, and how does it relate to the core ideas presented in your essay?"
+    },
+    {
+      "timestamp": "2025-11-04T02:07:58.483339",
+      "speaker": "student",
+      "text": "It seems we're experiencing a bit of"
+    },
+    {
+      "timestamp": "2025-11-04T02:08:01.512346",
+      "speaker": "bot",
+      "text": "I sense a bit of frustration here. Let's take a step back together.\n\nCan you clarify what aspect of your essay or argument feels like it's \"experiencing a bit of\"? What specific challenge, concern, or idea are you trying to address through this phrase? Is there something in the automated urban energy assessment process that feels elusive or unclear to you?\n\nPlease feel free to share more about where we left off and what you're hoping to convey. I'm here to listen and help you clarify your thoughts."
+    },
+    {
+      "timestamp": "2025-11-04T02:08:02.021643",
+      "speaker": "student",
+      "text": "Hello. Let's try it."
+    },
+    {
+      "timestamp": "2025-11-04T02:08:04.607860",
+      "speaker": "bot",
+      "text": "Let's indeed \"try it\". You said \"Hello. Let's try it.\" Can you connect this phrase back to the core idea or claim in your essay about automated urban energy assessment? What specific aspect of the process, or the challenges faced by sustainable cities, are you trying to address with these words?\n\nIn other words, what is the underlying concern or idea that you're hoping to convey by saying \"Hello. Let's try it\"?"
+    },
+    {
+      "timestamp": "2025-11-04T02:08:05.205884",
+      "speaker": "student",
+      "text": "from a certain essential bit of restoration here."
+    },
+    {
+      "timestamp": "2025-11-04T02:08:07.609373",
+      "speaker": "bot",
+      "text": "You mention \"essential bit of restoration.\" Can you clarify what this phrase means in the context of your essay? Are you referring to the restoration or improvement of existing buildings, or is it something more specific related to the automated urban energy assessment process?\n\nWhat do you mean by \"certain essential bit\"? Is there a particular aspect or component of this process that's crucial for achieving accurate or meaningful results in sustainable cities?"
+    }
+  ],
+  "message_count": 19,
+  "student_messages": 9,
+  "bot_messages": 10
+}

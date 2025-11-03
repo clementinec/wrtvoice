@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socratic Method Bot - Upload Essay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            padding: 48px;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            font-size: 32px;
+            margin-bottom: 12px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 16px;
+            margin-bottom: 40px;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 12px;
+            padding: 48px 24px;
+            margin-bottom: 24px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #f8f9ff;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f1ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8e9ff;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+
+        .upload-text {
+            color: #333;
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .upload-hint {
+            color: #666;
+            font-size: 14px;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .file-info {
+            background: #f0f1ff;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .file-info.visible {
+            display: block;
+        }
+
+        .file-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .file-details {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 16px 48px;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin-top: 16px;
+        }
+
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: none;
+            margin: 24px 0;
+        }
+
+        .loading.visible {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .error {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .error.visible {
+            display: block;
+        }
+
+        .success {
+            background: #efe;
+            border: 1px solid #cfc;
+            color: #3c3;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .success.visible {
+            display: block;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .status-indicator.active {
+            background: #3c3;
+        }
+
+        .status-indicator.inactive {
+            background: #c33;
+        }
+
+        .footer {
+            margin-top: 32px;
+            color: #999;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Socratic Method Bot</h1>
+        <p class="subtitle">Upload your essay to begin defending your arguments</p>
+
+        <div class="error" id="errorMsg"></div>
+        <div class="success" id="successMsg"></div>
+
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📄</div>
+            <div class="upload-text">Click to upload or drag & drop your essay</div>
+            <div class="upload-hint">PDF files only, max 10MB</div>
+        </div>
+
+        <input type="file" id="fileInput" accept=".pdf">
+
+        <div class="file-info" id="fileInfo">
+            <div class="file-name" id="fileName"></div>
+            <div class="file-details" id="fileDetails"></div>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div class="loading-text" id="loadingText">Processing PDF...</div>
+        </div>
+
+        <div style="margin-top: 16px; text-align: left;">
+            <label style="color: #666; font-size: 14px; display: block; margin-bottom: 8px;">
+                Pause detection timeout (seconds):
+            </label>
+            <input type="range" id="phraseTimeout" min="4" max="10" step="0.5" value="5.0"
+                   style="width: 100%;" oninput="this.nextElementSibling.textContent = this.value + 's'">
+            <span style="color: #667eea; font-weight: 600;">5.0s</span>
+            <p style="font-size: 12px; color: #999; margin-top: 4px;">
+                Lower = faster responses, Higher = more patient listening
+            </p>
+        </div>
+
+        <button class="btn" id="startBtn" disabled>Start Session</button>
+
+        <div class="footer">
+            <span class="status-indicator inactive" id="ollamaStatus"></span>
+            <span id="ollamaText">Checking Ollama...</span>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const fileDetails = document.getElementById('fileDetails');
+        const startBtn = document.getElementById('startBtn');
+        const loading = document.getElementById('loading');
+        const loadingText = document.getElementById('loadingText');
+        const errorMsg = document.getElementById('errorMsg');
+        const successMsg = document.getElementById('successMsg');
+        const ollamaStatus = document.getElementById('ollamaStatus');
+        const ollamaText = document.getElementById('ollamaText');
+
+        let uploadedFile = null;
+
+        // Check Ollama status on load
+        async function checkHealth() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+
+                if (data.ollama_connected) {
+                    ollamaStatus.className = 'status-indicator active';
+                    ollamaText.textContent = 'Ollama connected';
+                } else {
+                    ollamaStatus.className = 'status-indicator inactive';
+                    ollamaText.textContent = 'Ollama not available';
+                }
+            } catch (error) {
+                ollamaStatus.className = 'status-indicator inactive';
+                ollamaText.textContent = 'Server not responding';
+            }
+        }
+
+        checkHealth();
+
+        // Upload area click
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        // File input change
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        // Handle file upload
+        async function handleFile(file) {
+            if (!file.name.endsWith('.pdf')) {
+                showError('Please upload a PDF file');
+                return;
+            }
+
+            if (file.size > 10 * 1024 * 1024) {
+                showError('File size must be less than 10MB');
+                return;
+            }
+
+            uploadedFile = file;
+
+            // Show file info
+            fileName.textContent = file.name;
+            fileDetails.textContent = `${(file.size / 1024).toFixed(1)} KB`;
+            fileInfo.classList.add('visible');
+
+            // Upload to server
+            loading.classList.add('visible');
+            loadingText.textContent = 'Processing PDF...';
+            errorMsg.classList.remove('visible');
+            successMsg.classList.remove('visible');
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload-pdf', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showSuccess(data.message);
+                    startBtn.disabled = false;
+                } else {
+                    showError(data.detail || 'Error processing PDF');
+                }
+            } catch (error) {
+                showError('Failed to upload PDF: ' + error.message);
+            } finally {
+                loading.classList.remove('visible');
+            }
+        }
+
+        // Start session
+        startBtn.addEventListener('click', async () => {
+            loading.classList.add('visible');
+            loadingText.textContent = 'Initializing Whisper model and session...';
+            startBtn.disabled = true;
+            errorMsg.classList.remove('visible');
+
+            try {
+                const phraseTimeout = parseFloat(document.getElementById('phraseTimeout').value);
+
+                const response = await fetch('/start-session', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        whisper_model: 'base',
+                        phrase_timeout: phraseTimeout
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Redirect to conversation page
+                    window.location.href = '/conversation';
+                } else {
+                    showError(data.detail || 'Error starting session');
+                    startBtn.disabled = false;
+                }
+            } catch (error) {
+                showError('Failed to start session: ' + error.message);
+                startBtn.disabled = false;
+            } finally {
+                loading.classList.remove('visible');
+            }
+        });
+
+        function showError(message) {
+            errorMsg.textContent = message;
+            errorMsg.classList.add('visible');
+            successMsg.classList.remove('visible');
+        }
+
+        function showSuccess(message) {
+            successMsg.textContent = message;
+            successMsg.classList.add('visible');
+            errorMsg.classList.remove('visible');
+        }
+    </script>
+</body>
+</html>

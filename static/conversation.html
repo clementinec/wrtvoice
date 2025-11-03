@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socratic Dialogue - Active Session</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 16px 16px 0 0;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pulse {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #3c3;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .chat-container {
+            background: white;
+            height: 500px;
+            overflow-y: auto;
+            padding: 24px;
+            border-left: 1px solid #eee;
+            border-right: 1px solid #eee;
+        }
+
+        .message {
+            margin-bottom: 24px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .speaker-label {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .message.bot .speaker-label {
+            color: #667eea;
+        }
+
+        .message.student .speaker-label {
+            color: #764ba2;
+        }
+
+        .timestamp {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .message-text {
+            background: #f8f9ff;
+            padding: 16px;
+            border-radius: 12px;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .message.bot .message-text {
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            border-left: 3px solid #667eea;
+        }
+
+        .message.student .message-text {
+            background: #f0f1ff;
+            border-left: 3px solid #764ba2;
+        }
+
+        .message.transcribing .message-text {
+            opacity: 0.7;
+            font-style: italic;
+        }
+
+        .thinking {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 16px;
+            background: #f8f9ff;
+            border-radius: 12px;
+            color: #666;
+            font-style: italic;
+            display: none;
+        }
+
+        .thinking.visible {
+            display: flex;
+        }
+
+        .thinking-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .thinking-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #667eea;
+            animation: bounce 1.4s infinite ease-in-out;
+        }
+
+        .thinking-dot:nth-child(1) { animation-delay: -0.32s; }
+        .thinking-dot:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        .controls {
+            background: white;
+            border-radius: 0 0 16px 16px;
+            padding: 24px;
+            box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .mic-status {
+            text-align: center;
+            margin-bottom: 16px;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .mic-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn.secondary {
+            background: #eee;
+            color: #666;
+        }
+
+        .btn.secondary:hover {
+            background: #ddd;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .error-banner {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .error-banner.visible {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Socratic Dialogue Session</h1>
+            <div class="status-bar">
+                <div class="status-indicator">
+                    <div class="pulse"></div>
+                    <span id="statusText">Listening...</span>
+                </div>
+                <div>
+                    <span id="messageCount">0 exchanges</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="error-banner" id="errorBanner"></div>
+
+        <div class="chat-container" id="chatContainer">
+            <!-- Messages will be added here dynamically -->
+        </div>
+
+        <div class="thinking" id="thinkingIndicator">
+            <span id="thinkingText">Analyzing</span>
+            <div class="thinking-dots">
+                <div class="thinking-dot"></div>
+                <div class="thinking-dot"></div>
+                <div class="thinking-dot"></div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="mic-status">
+                <div class="mic-icon">🎤</div>
+                <div id="micStatus">Speak naturally - pauses will trigger responses</div>
+            </div>
+
+            <div class="button-group">
+                <button class="btn secondary" id="endBtn">End Session</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+        let currentTranscription = null;
+
+        const chatContainer = document.getElementById('chatContainer');
+        const statusText = document.getElementById('statusText');
+        const messageCountEl = document.getElementById('messageCount');
+        const thinkingIndicator = document.getElementById('thinkingIndicator');
+        const errorBanner = document.getElementById('errorBanner');
+        const endBtn = document.getElementById('endBtn');
+        const micStatus = document.getElementById('micStatus');
+
+        // Connect to WebSocket
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                statusText.textContent = 'Connected - Listening...';
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                showError('Connection error occurred');
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                statusText.textContent = 'Disconnected';
+            };
+        }
+
+        let currentBotMessage = null;
+        let currentBotText = "";
+
+        // Handle incoming WebSocket messages
+        function handleWebSocketMessage(data) {
+            console.log('Received:', data);
+
+            switch(data.type) {
+                case 'ready':
+                    statusText.textContent = 'Listening...';
+                    break;
+
+                case 'status':
+                    handleStatusUpdate(data.status, data.time_remaining);
+                    break;
+
+                case 'transcription':
+                    handleTranscription(data);
+                    break;
+
+                case 'bot_response_chunk':
+                    handleBotChunk(data);
+                    break;
+
+                case 'bot_response_complete':
+                    handleBotComplete(data);
+                    break;
+
+                case 'bot_thinking':
+                    // Legacy support
+                    handleStatusUpdate('analyzing');
+                    break;
+
+                case 'bot_response':
+                    // Legacy non-streaming response
+                    handleBotResponse(data);
+                    break;
+
+                case 'error':
+                    showError(data.message);
+                    break;
+            }
+        }
+
+        // Handle status updates
+        function handleStatusUpdate(status, timeRemaining = null) {
+            switch(status) {
+                case 'listening':
+                    statusText.textContent = 'Listening...';
+                    thinkingIndicator.classList.remove('visible');
+                    break;
+                case 'pausing':
+                    if (timeRemaining !== null) {
+                        statusText.textContent = `Pausing (${timeRemaining.toFixed(1)}s)...`;
+                    } else {
+                        statusText.textContent = 'Pausing...';
+                    }
+                    thinkingIndicator.classList.remove('visible');
+                    break;
+                case 'analyzing':
+                    statusText.textContent = 'Analyzing...';
+                    thinkingIndicator.classList.add('visible');
+                    break;
+                case 'responding':
+                    statusText.textContent = 'Responding...';
+                    thinkingIndicator.classList.remove('visible');
+                    break;
+            }
+        }
+
+        // Handle transcription updates
+        function handleTranscription(data) {
+            const text = data.text;
+            const phraseComplete = data.phrase_complete;
+
+            if (phraseComplete) {
+                // Finalize the transcription
+                if (currentTranscription) {
+                    // Update the existing live message with final text and remove transcribing class
+                    const textEl = currentTranscription.querySelector('.message-text');
+                    textEl.textContent = text;
+                    currentTranscription.classList.remove('transcribing');
+                    currentTranscription = null;
+                } else {
+                    // No live message existed, add a new one (shouldn't normally happen)
+                    if (text.trim()) {
+                        addMessage('student', text, data.timestamp, false);
+                    }
+                }
+
+                // Count this as a completed message
+                messageCount++;
+                updateMessageCount();
+            } else {
+                // Update live transcription
+                if (!currentTranscription) {
+                    currentTranscription = addMessage('student', text, data.timestamp, true);
+                } else {
+                    const textEl = currentTranscription.querySelector('.message-text');
+                    textEl.textContent = text;
+                }
+            }
+
+            // Auto-scroll
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Handle bot response (legacy non-streaming)
+        function handleBotResponse(data) {
+            thinkingIndicator.classList.remove('visible');
+            statusText.textContent = 'Listening...';
+
+            addMessage('bot', data.text, data.timestamp);
+            messageCount++;
+            updateMessageCount();
+
+            // Auto-scroll
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Handle bot response chunk (streaming)
+        function handleBotChunk(data) {
+            if (!currentBotMessage) {
+                // Create new bot message for streaming
+                const time = new Date(data.timestamp).toLocaleTimeString();
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message bot';
+                messageDiv.innerHTML = `
+                    <div class="message-header">
+                        <span class="speaker-label">🤖 Socratic Tutor</span>
+                        <span class="timestamp">${time}</span>
+                    </div>
+                    <div class="message-text"></div>
+                `;
+                chatContainer.appendChild(messageDiv);
+                currentBotMessage = messageDiv.querySelector('.message-text');
+                currentBotText = "";
+            }
+
+            // Append chunk to current message
+            currentBotText += data.chunk;
+            currentBotMessage.textContent = currentBotText;
+
+            // Auto-scroll
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Handle bot response complete (streaming done)
+        function handleBotComplete(data) {
+            currentBotMessage = null;
+            currentBotText = "";
+            messageCount++;
+            updateMessageCount();
+        }
+
+        // Add message to chat
+        function addMessage(speaker, text, timestamp, isTranscribing = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${speaker}${isTranscribing ? ' transcribing' : ''}`;
+
+            const time = new Date(timestamp).toLocaleTimeString();
+
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <span class="speaker-label">${speaker === 'bot' ? '🤖 Socratic Tutor' : '👤 You'}</span>
+                    <span class="timestamp">${time}</span>
+                </div>
+                <div class="message-text">${text}</div>
+            `;
+
+            chatContainer.appendChild(messageDiv);
+            return messageDiv;
+        }
+
+        // Update message count
+        function updateMessageCount() {
+            const exchanges = Math.floor(messageCount / 2);
+            messageCountEl.textContent = `${exchanges} exchange${exchanges !== 1 ? 's' : ''}`;
+        }
+
+        // Show error
+        function showError(message) {
+            errorBanner.textContent = message;
+            errorBanner.classList.add('visible');
+            setTimeout(() => {
+                errorBanner.classList.remove('visible');
+            }, 5000);
+        }
+
+        // End session
+        endBtn.addEventListener('click', async () => {
+            if (!confirm('Are you sure you want to end this session?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/end-session', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    alert(`Session saved!\n\nTotal messages: ${data.message_count}\nJSON: ${data.json_file}\nText: ${data.text_file}`);
+                    window.location.href = '/';
+                } else {
+                    showError(data.detail || 'Error ending session');
+                }
+            } catch (error) {
+                showError('Failed to end session: ' + error.message);
+            }
+        });
+
+        // Initialize
+        connectWebSocket();
+
+        // Add initial bot message (will be sent by server)
+        // The server sends the initial greeting, so we'll receive it via WebSocket
+    </script>
+</body>
+</html>
