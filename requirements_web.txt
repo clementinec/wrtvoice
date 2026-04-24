@@ -3,6 +3,7 @@ uvicorn[standard]
 websockets
 python-multipart
 PyPDF2
+PyMuPDF
 requests
 python-dotenv
 aiohttp

@@ -1,13 +1,13 @@
 # Socratic Method Bot
 
-A local FastAPI app for practicing essay defense through Socratic questioning.
-The default interface is typed chat; voice mode is still available when Whisper
-and local audio dependencies are installed.
+A local FastAPI app for working on essays with an LLM. The default interface is
+typed essay editing; voice mode is still available for Socratic defense practice
+when Whisper and local audio dependencies are installed.
 
 ## Features
 
-- PDF upload with first-500-word context extraction.
-- Text chat mode with no microphone or Whisper dependency.
+- PDF upload with up to 5,000 words imported for the current pilot.
+- Text editing mode with no microphone or Whisper dependency.
 - Optional voice mode using local Whisper speech-to-text.
 - Local Ollama/LLaMA response generation.
 - Streaming bot responses in voice mode.
@@ -19,6 +19,12 @@ Text mode:
 
 ```bash
 pip install -r requirements_web.txt
+```
+
+For scanned PDFs or PDFs printed from a browser viewer, install OCR support:
+
+```bash
+brew install tesseract
 ```
 
 Voice mode also requires the audio/Whisper stack:
@@ -55,10 +61,16 @@ http://localhost:8000
 ## Usage
 
 1. Upload a PDF essay.
-2. Choose `Text chat` or `Voice`.
+2. Choose `Text editing` or `Voice`.
 3. Start the session.
-4. Answer the tutor's questions.
-5. End the session to save JSON and text exports.
+4. In text mode, ask for routine essay help such as thesis revision, structure,
+   clarity edits, paragraph rewrites, or feedback.
+5. In voice mode, answer the tutor's Socratic questions.
+6. End the session to save JSON and text exports.
+
+For the current pilot, essays under 5,000 words are imported directly. Longer
+essays are accepted, but only the first 5,000 words are used as model context
+and the upload page shows a truncation notice.
 
 Voice mode uses the microphone attached to the machine running the FastAPI
 server, not the browser client's microphone. For remote/browser-client voice,
@@ -94,6 +106,7 @@ conversations/              Saved session exports
 ## Maintenance Notes
 
 - `requirements_web.txt` is enough for text mode.
+- OCR fallback requires `tesseract` on the system path.
 - `requirements_all.txt` installs everything, including optional voice/TTS code.
 - The current app keeps one active in-memory session at a time.
 - Generated caches and temporary uploads are ignored by `.gitignore`; existing

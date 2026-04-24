@@ -1,13 +1,12 @@
 """
 Ollama Client Module
-Handles communication with local Ollama instance running llama3.1 for Socratic dialogue.
+Handles communication with local Ollama instance running llama3.1.
 """
 
-import requests
 import json
-from typing import List, Dict, Optional, AsyncGenerator
+from typing import List, Dict, AsyncGenerator
 import aiohttp
-import asyncio
+import requests
 
 
 class OllamaClient:
@@ -25,6 +24,17 @@ Your role:
 - Focus on one question or challenge at a time
 
 Remember: Your goal is to strengthen their argument by making them defend it thoroughly."""
+
+    ESSAY_EDITOR_SYSTEM_PROMPT = """You are a practical essay editing assistant.
+
+Your role:
+- Follow the student's editing command directly
+- Help with thesis clarity, structure, evidence, transitions, style, and revision
+- When useful, provide concrete rewritten text the student can adapt
+- Preserve the student's intended argument and voice
+- Do not invent sources, quotes, page numbers, or facts
+- Ask a clarifying question only when the request cannot be answered responsibly
+- Be concise, specific, and action-oriented"""
 
     def __init__(self, base_url: str = "http://localhost:11434", model: str = "llama3.1:latest"):
         """
@@ -52,17 +62,25 @@ Remember: Your goal is to strengthen their argument by making them defend it tho
         except Exception:
             return False
 
-    def initialize_context(self, pdf_context: str) -> Dict:
+    def initialize_context(self, pdf_context: str, mode: str = "voice") -> Dict:
         """
         Initialize conversation context with PDF content.
 
         Args:
-            pdf_context: First 500 words from the student's essay
+            pdf_context: Essay excerpt from the student's PDF
+            mode: voice for Socratic dialogue, text for command-following editing
 
         Returns:
-            Initial bot response welcoming the student
+            Initial bot response welcoming the student in the selected mode
         """
-        initial_prompt = f"""The student has submitted an essay. Here are the first 500 words:
+        if mode == "text":
+            return self.initialize_editor_context(pdf_context)
+
+        return self.initialize_socratic_context(pdf_context)
+
+    def initialize_socratic_context(self, pdf_context: str) -> Dict:
+        """Generate the opening message for voice/Socratic mode."""
+        initial_prompt = f"""The student has submitted an essay. Here is the essay context:
 
 ---
 {pdf_context}
@@ -73,6 +91,25 @@ Generate a brief welcoming message (under 40 words) that:
 2. Asks them to explain their main thesis or central argument in their own words
 
 Be encouraging but set an intellectually rigorous tone."""
+
+        return self.generate(initial_prompt)
+
+    def initialize_editor_context(self, pdf_context: str) -> Dict:
+        """Generate the opening message for text/editor mode."""
+        initial_prompt = f"""{self.ESSAY_EDITOR_SYSTEM_PROMPT}
+
+The student has uploaded an essay. Here is the essay context:
+
+---
+{pdf_context}
+---
+
+Generate a brief opening message (under 45 words) that:
+1. Says you have reviewed the essay
+2. Asks how they would like to improve it today
+3. Gives 2-3 example requests such as thesis, structure, clarity, or rewriting a paragraph
+
+Do not use Socratic questioning here."""
 
         return self.generate(initial_prompt)
 
@@ -101,7 +138,7 @@ Be encouraging but set an intellectually rigorous tone."""
 
         prompt = f"""{self.SOCRATIC_SYSTEM_PROMPT}
 
-Essay Context (first 500 words):
+Essay Context:
 {pdf_context}
 
 Recent Conversation:
@@ -139,7 +176,7 @@ Your Socratic response:"""
 
         prompt = f"""{self.SOCRATIC_SYSTEM_PROMPT}
 
-Essay Context (first 500 words):
+Essay Context:
 {pdf_context}
 
 Recent Conversation:
@@ -149,6 +186,36 @@ Student's latest statement:
 "{student_input}"
 
 Your Socratic response:"""
+
+        async for chunk in self.generate_stream(prompt):
+            yield chunk
+
+    async def generate_editor_response_stream(
+        self,
+        student_input: str,
+        pdf_context: str,
+        conversation_history: List[Dict[str, str]]
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generate a command-following essay editing response with streaming.
+        """
+        history_text = "\n".join([
+            f"{msg['speaker'].upper()}: {msg['text']}"
+            for msg in conversation_history[-8:]
+        ])
+
+        prompt = f"""{self.ESSAY_EDITOR_SYSTEM_PROMPT}
+
+Essay Context:
+{pdf_context}
+
+Recent Conversation:
+{history_text if history_text else "(No prior conversation)"}
+
+Student's latest request:
+"{student_input}"
+
+Your direct editing response:"""
 
         async for chunk in self.generate_stream(prompt):
             yield chunk

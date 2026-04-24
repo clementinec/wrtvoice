@@ -35,7 +35,7 @@ class ConversationManager:
         Start a new conversation session.
 
         Args:
-            pdf_context: First 500 words from the PDF
+            pdf_context: Imported essay context from the PDF
             pdf_metadata: Metadata about the PDF
 
         Returns:
@@ -245,7 +245,7 @@ class ConversationManager:
             f.write(f"Date: {self.session_start.strftime('%Y-%m-%d %H:%M:%S') if self.session_start else 'Unknown'}\n")
             f.write("=" * 70 + "\n\n")
 
-            f.write("ESSAY CONTEXT (First 500 words):\n")
+            f.write("ESSAY CONTEXT:\n")
             f.write("-" * 70 + "\n")
             f.write(self.pdf_context)
             f.write("\n\n" + "=" * 70 + "\n\n")

@@ -189,6 +189,22 @@
             display: block;
         }
 
+        .notice {
+            background: #fff8e6;
+            border: 1px solid #f3d27b;
+            color: #7a5600;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .notice.visible {
+            display: block;
+        }
+
         .status-indicator {
             display: inline-block;
             width: 8px;
@@ -256,10 +272,11 @@
 <body>
     <div class="container">
         <h1>Socratic Method Bot</h1>
-        <p class="subtitle">Upload your essay to begin defending your arguments</p>
+        <p class="subtitle">Upload your essay to edit, revise, or practice defending it</p>
 
         <div class="error" id="errorMsg"></div>
         <div class="success" id="successMsg"></div>
+        <div class="notice" id="contextNotice"></div>
 
         <div class="upload-area" id="uploadArea">
             <div class="upload-icon">📄</div>
@@ -282,8 +299,8 @@
         <div class="mode-selector" aria-label="Session mode">
             <label class="mode-option">
                 <input type="radio" name="sessionMode" value="text" checked>
-                <span class="mode-title">Text chat</span>
-                <span class="mode-hint">No microphone or Whisper required.</span>
+                <span class="mode-title">Text editing</span>
+                <span class="mode-hint">Ask for revisions, structure, clarity, or feedback.</span>
             </label>
             <label class="mode-option">
                 <input type="radio" name="sessionMode" value="voice">
@@ -323,6 +340,7 @@
         const loadingText = document.getElementById('loadingText');
         const errorMsg = document.getElementById('errorMsg');
         const successMsg = document.getElementById('successMsg');
+        const contextNotice = document.getElementById('contextNotice');
         const ollamaStatus = document.getElementById('ollamaStatus');
         const ollamaText = document.getElementById('ollamaText');
         const modeInputs = document.querySelectorAll('input[name="sessionMode"]');
@@ -416,6 +434,7 @@
             loadingText.textContent = 'Processing PDF...';
             errorMsg.classList.remove('visible');
             successMsg.classList.remove('visible');
+            contextNotice.classList.remove('visible');
 
             const formData = new FormData();
             formData.append('file', file);
@@ -430,6 +449,7 @@
 
                 if (response.ok) {
                     showSuccess(data.message);
+                    showContextNotice(data.context);
                     startBtn.disabled = false;
                 } else {
                     showError(data.detail || 'Error processing PDF');
@@ -491,6 +511,28 @@
             successMsg.textContent = message;
             successMsg.classList.add('visible');
             errorMsg.classList.remove('visible');
+        }
+
+        function showContextNotice(context) {
+            if (!context) {
+                contextNotice.classList.remove('visible');
+                return;
+            }
+
+            if (context.truncated) {
+                contextNotice.textContent = `Pilot note: this essay appears to be ${context.total_words} words. `
+                    + `For the current pilot, the assistant will work with the first ${context.word_limit} words.`;
+                contextNotice.classList.add('visible');
+                return;
+            }
+
+            if (context.extraction_method === 'ocr') {
+                contextNotice.textContent = 'Imported using OCR because the PDF did not expose normal selectable text.';
+                contextNotice.classList.add('visible');
+                return;
+            }
+
+            contextNotice.classList.remove('visible');
         }
     </script>
 </body>

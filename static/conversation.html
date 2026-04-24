@@ -280,7 +280,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Socratic Dialogue Session</h1>
+            <h1 id="sessionTitle">Socratic Dialogue Session</h1>
             <div class="status-bar">
                 <div class="status-indicator">
                     <div class="pulse"></div>
@@ -334,6 +334,7 @@
         let sessionMode = new URLSearchParams(window.location.search).get('mode') || 'voice';
 
         const chatContainer = document.getElementById('chatContainer');
+        const sessionTitle = document.getElementById('sessionTitle');
         const statusText = document.getElementById('statusText');
         const messageCountEl = document.getElementById('messageCount');
         const thinkingIndicator = document.getElementById('thinkingIndicator');
@@ -371,6 +372,7 @@
         }
 
         function enableVoiceMode() {
+            sessionTitle.textContent = 'Socratic Dialogue Session';
             voiceControls.classList.remove('hidden');
             textControls.classList.remove('visible');
             statusText.textContent = 'Connecting...';
@@ -378,8 +380,10 @@
         }
 
         function enableTextMode(conversation) {
+            sessionTitle.textContent = 'Essay Editing Session';
             voiceControls.classList.add('hidden');
             textControls.classList.add('visible');
+            messageInput.placeholder = 'Ask for a revision, thesis feedback, structure help, clarity edits, or a rewritten paragraph...';
             statusText.textContent = 'Text mode - Ready';
             renderHistory(conversation);
             messageInput.focus();
@@ -596,6 +600,10 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
+        function botLabel() {
+            return sessionMode === 'text' ? '🤖 Essay Assistant' : '🤖 Socratic Tutor';
+        }
+
         // Add message to chat
         function addMessage(speaker, text, timestamp, isTranscribing = false) {
             const messageDiv = document.createElement('div');
@@ -607,7 +615,7 @@
 
             const speakerLabel = document.createElement('span');
             speakerLabel.className = 'speaker-label';
-            speakerLabel.textContent = speaker === 'bot' ? '🤖 Socratic Tutor' : '👤 You';
+            speakerLabel.textContent = speaker === 'bot' ? botLabel() : '👤 You';
 
             const timestampEl = document.createElement('span');
             timestampEl.className = 'timestamp';

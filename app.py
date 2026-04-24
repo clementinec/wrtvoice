@@ -18,6 +18,9 @@ from modules.ollama_client import OllamaClient
 from modules.conversation_manager import ConversationManager
 
 
+PDF_CONTEXT_WORD_LIMIT = 5000
+
+
 # Request models
 class SessionStartRequest(BaseModel):
     mode: str = "voice"
@@ -43,6 +46,7 @@ current_session = {
     "pdf_uploaded": False,
     "pdf_context": "",
     "pdf_metadata": {},
+    "pdf_context_stats": {},
     "session_active": False,
     "mode": "voice",
     "whisper_stt": None
@@ -82,16 +86,49 @@ def stop_active_voice_session() -> None:
         current_session["whisper_stt"] = None
 
 
+def public_context_stats(context_stats: dict) -> dict:
+    """Return context metadata without echoing essay text to the browser."""
+    return {key: value for key, value in context_stats.items() if key != "text"}
+
+
+def pdf_extraction_error(context_summary: dict) -> str:
+    """Build a specific upload error for PDFs without usable essay text."""
+    if context_summary.get("boilerplate_detected"):
+        if context_summary.get("ocr_available"):
+            return (
+                "The PDF appears to contain viewer headers or scanned pages, "
+                "but OCR did not find usable essay text. Please upload the original "
+                "searchable PDF or export it with OCR."
+            )
+        return (
+            "The PDF appears to contain viewer headers or scanned pages, not searchable essay text. "
+            "Please upload the original searchable PDF, or install OCR support with "
+            "`brew install tesseract` and `pip install PyMuPDF`."
+        )
+
+    return "No readable text found in PDF"
+
+
 async def generate_bot_response(student_text: str, on_chunk=None) -> str:
-    """Generate the bot response with the shared Socratic prompt path."""
+    """Generate a mode-appropriate bot response."""
     conversation_history = conversation_manager.get_conversation_history(last_n=10)
     full_response = ""
+    mode = current_session["mode"]
 
-    async for chunk in ollama_client.generate_socratic_response_stream(
-        student_input=student_text,
-        pdf_context=current_session["pdf_context"],
-        conversation_history=conversation_history
-    ):
+    if mode == "text":
+        response_stream = ollama_client.generate_editor_response_stream(
+            student_input=student_text,
+            pdf_context=current_session["pdf_context"],
+            conversation_history=conversation_history
+        )
+    else:
+        response_stream = ollama_client.generate_socratic_response_stream(
+            student_input=student_text,
+            pdf_context=current_session["pdf_context"],
+            conversation_history=conversation_history
+        )
+
+    async for chunk in response_stream:
         if chunk:
             full_response += chunk
             if on_chunk:
@@ -129,7 +166,7 @@ async def health_check():
 @app.post("/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...)):
     """
-    Handle PDF upload and extract first 500 words.
+    Handle PDF upload and extract essay context for the pilot.
     """
     # Validate file type
     if not file.filename.endswith('.pdf'):
@@ -148,7 +185,15 @@ async def upload_pdf(file: UploadFile = File(...)):
 
         # Extract text from PDF
         parser = PDFParser()
-        pdf_context = parser.extract_first_n_words(temp_path, n_words=500)
+        context_stats = parser.extract_words_with_stats(
+            temp_path,
+            max_words=PDF_CONTEXT_WORD_LIMIT
+        )
+        pdf_context = context_stats["text"]
+        context_summary = public_context_stats(context_stats)
+        if not pdf_context.strip() or context_summary.get("low_confidence_extraction"):
+            raise HTTPException(status_code=400, detail=pdf_extraction_error(context_summary))
+
         pdf_metadata = parser.get_metadata(temp_path)
 
         # Store in session
@@ -156,13 +201,21 @@ async def upload_pdf(file: UploadFile = File(...)):
         current_session["pdf_context"] = pdf_context
         current_session["pdf_metadata"] = pdf_metadata
         current_session["pdf_metadata"]["filename"] = file.filename
+        current_session["pdf_metadata"]["words_extracted"] = context_summary["words_extracted"]
+        current_session["pdf_metadata"]["total_words"] = context_summary["total_words"]
+        current_session["pdf_metadata"]["word_limit"] = context_summary["word_limit"]
+        current_session["pdf_metadata"]["truncated"] = context_summary["truncated"]
+        current_session["pdf_context_stats"] = context_summary
 
         return {
             "success": True,
-            "message": f"PDF processed: {len(pdf_context.split())} words extracted",
-            "metadata": pdf_metadata
+            "message": f"PDF processed: {context_summary['words_extracted']} words imported",
+            "metadata": pdf_metadata,
+            "context": context_summary
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
 
@@ -201,7 +254,10 @@ async def start_session(request: SessionStartRequest):
         )
 
         # Get initial bot greeting from Ollama
-        initial_response = ollama_client.initialize_context(current_session["pdf_context"])
+        initial_response = ollama_client.initialize_context(
+            current_session["pdf_context"],
+            mode=mode
+        )
         bot_message = initial_response.get("response", "Hello! Let's discuss your essay.")
 
         # Add to conversation
@@ -244,6 +300,7 @@ async def session_state():
         "session_active": current_session["session_active"],
         "mode": current_session["mode"],
         "metadata": current_session["pdf_metadata"],
+        "context": current_session["pdf_context_stats"],
         "conversation": conversation_manager.get_conversation_history()
         if current_session["session_active"]
         else []
@@ -253,10 +310,13 @@ async def session_state():
 @app.post("/message")
 async def send_text_message(request: MessageRequest):
     """
-    Submit a typed student message and return the Socratic response.
+    Submit a typed student message and return the editor response.
     """
     if not current_session["session_active"]:
         raise HTTPException(status_code=400, detail="No active session")
+
+    if current_session["mode"] != "text":
+        raise HTTPException(status_code=400, detail="Typed messages are available in text mode only")
 
     text = request.text.strip()
     if not text:
