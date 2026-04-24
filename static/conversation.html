@@ -232,6 +232,49 @@
         .error-banner.visible {
             display: block;
         }
+
+        .text-controls {
+            display: none;
+            margin-bottom: 16px;
+        }
+
+        .text-controls.visible {
+            display: block;
+        }
+
+        .text-form {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 12px;
+            align-items: end;
+        }
+
+        .message-input {
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            color: #333;
+            font: inherit;
+            min-height: 84px;
+            padding: 12px;
+            resize: vertical;
+            width: 100%;
+        }
+
+        .message-input:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+            outline: none;
+        }
+
+        .voice-controls.hidden {
+            display: none;
+        }
+
+        @media (max-width: 640px) {
+            .text-form {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -265,9 +308,17 @@
         </div>
 
         <div class="controls">
-            <div class="mic-status">
+            <div class="mic-status voice-controls" id="voiceControls">
                 <div class="mic-icon">🎤</div>
                 <div id="micStatus">Speak naturally - pauses will trigger responses</div>
+            </div>
+
+            <div class="text-controls" id="textControls">
+                <form class="text-form" id="textForm">
+                    <textarea class="message-input" id="messageInput" rows="3"
+                              placeholder="Type your answer or defense here..."></textarea>
+                    <button class="btn" id="sendBtn" type="submit">Send</button>
+                </form>
             </div>
 
             <div class="button-group">
@@ -280,6 +331,7 @@
         let ws = null;
         let messageCount = 0;
         let currentTranscription = null;
+        let sessionMode = new URLSearchParams(window.location.search).get('mode') || 'voice';
 
         const chatContainer = document.getElementById('chatContainer');
         const statusText = document.getElementById('statusText');
@@ -288,6 +340,50 @@
         const errorBanner = document.getElementById('errorBanner');
         const endBtn = document.getElementById('endBtn');
         const micStatus = document.getElementById('micStatus');
+        const voiceControls = document.getElementById('voiceControls');
+        const textControls = document.getElementById('textControls');
+        const textForm = document.getElementById('textForm');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        async function initializeSession() {
+            try {
+                const response = await fetch('/session-state');
+                const state = await response.json();
+
+                if (!response.ok || !state.session_active) {
+                    showError('No active session. Start a new session from the upload page.');
+                    statusText.textContent = 'No active session';
+                    return;
+                }
+
+                sessionMode = state.mode || sessionMode;
+
+                if (sessionMode === 'text') {
+                    enableTextMode(state.conversation || []);
+                } else {
+                    enableVoiceMode();
+                }
+            } catch (error) {
+                showError('Failed to load session: ' + error.message);
+                statusText.textContent = 'Session unavailable';
+            }
+        }
+
+        function enableVoiceMode() {
+            voiceControls.classList.remove('hidden');
+            textControls.classList.remove('visible');
+            statusText.textContent = 'Connecting...';
+            connectWebSocket();
+        }
+
+        function enableTextMode(conversation) {
+            voiceControls.classList.add('hidden');
+            textControls.classList.add('visible');
+            statusText.textContent = 'Text mode - Ready';
+            renderHistory(conversation);
+            messageInput.focus();
+        }
 
         // Connect to WebSocket
         function connectWebSocket() {
@@ -444,15 +540,27 @@
                 const time = new Date(data.timestamp).toLocaleTimeString();
                 const messageDiv = document.createElement('div');
                 messageDiv.className = 'message bot';
-                messageDiv.innerHTML = `
-                    <div class="message-header">
-                        <span class="speaker-label">🤖 Socratic Tutor</span>
-                        <span class="timestamp">${time}</span>
-                    </div>
-                    <div class="message-text"></div>
-                `;
+
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'message-header';
+
+                const speakerLabel = document.createElement('span');
+                speakerLabel.className = 'speaker-label';
+                speakerLabel.textContent = '🤖 Socratic Tutor';
+
+                const timestampEl = document.createElement('span');
+                timestampEl.className = 'timestamp';
+                timestampEl.textContent = time;
+
+                const textDiv = document.createElement('div');
+                textDiv.className = 'message-text';
+
+                headerDiv.appendChild(speakerLabel);
+                headerDiv.appendChild(timestampEl);
+                messageDiv.appendChild(headerDiv);
+                messageDiv.appendChild(textDiv);
                 chatContainer.appendChild(messageDiv);
-                currentBotMessage = messageDiv.querySelector('.message-text');
+                currentBotMessage = textDiv;
                 currentBotText = "";
             }
 
@@ -472,20 +580,47 @@
             updateMessageCount();
         }
 
+        function renderHistory(messages) {
+            chatContainer.innerHTML = '';
+            messageCount = 0;
+            currentTranscription = null;
+            currentBotMessage = null;
+            currentBotText = "";
+
+            messages.forEach((message) => {
+                addMessage(message.speaker, message.text, message.timestamp, false);
+                messageCount++;
+            });
+
+            updateMessageCount();
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
         // Add message to chat
         function addMessage(speaker, text, timestamp, isTranscribing = false) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${speaker}${isTranscribing ? ' transcribing' : ''}`;
 
             const time = new Date(timestamp).toLocaleTimeString();
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'message-header';
 
-            messageDiv.innerHTML = `
-                <div class="message-header">
-                    <span class="speaker-label">${speaker === 'bot' ? '🤖 Socratic Tutor' : '👤 You'}</span>
-                    <span class="timestamp">${time}</span>
-                </div>
-                <div class="message-text">${text}</div>
-            `;
+            const speakerLabel = document.createElement('span');
+            speakerLabel.className = 'speaker-label';
+            speakerLabel.textContent = speaker === 'bot' ? '🤖 Socratic Tutor' : '👤 You';
+
+            const timestampEl = document.createElement('span');
+            timestampEl.className = 'timestamp';
+            timestampEl.textContent = time;
+
+            const textDiv = document.createElement('div');
+            textDiv.className = 'message-text';
+            textDiv.textContent = text;
+
+            headerDiv.appendChild(speakerLabel);
+            headerDiv.appendChild(timestampEl);
+            messageDiv.appendChild(headerDiv);
+            messageDiv.appendChild(textDiv);
 
             chatContainer.appendChild(messageDiv);
             return messageDiv;
@@ -505,6 +640,57 @@
                 errorBanner.classList.remove('visible');
             }, 5000);
         }
+
+        function setTextInputEnabled(enabled) {
+            messageInput.disabled = !enabled;
+            sendBtn.disabled = !enabled;
+        }
+
+        textForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+
+            const text = messageInput.value.trim();
+            if (!text) {
+                return;
+            }
+
+            const timestamp = new Date().toISOString();
+            addMessage('student', text, timestamp, false);
+            messageCount++;
+            updateMessageCount();
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            messageInput.value = '';
+            setTextInputEnabled(false);
+            statusText.textContent = 'Responding...';
+            thinkingIndicator.classList.add('visible');
+
+            try {
+                const response = await fetch('/message', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({text})
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Error generating response');
+                }
+
+                addMessage('bot', data.bot_message.text, data.bot_message.timestamp, false);
+                messageCount++;
+                updateMessageCount();
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+                statusText.textContent = 'Text mode - Ready';
+            } catch (error) {
+                showError('Failed to send message: ' + error.message);
+                statusText.textContent = 'Text mode - Ready';
+            } finally {
+                thinkingIndicator.classList.remove('visible');
+                setTextInputEnabled(true);
+                messageInput.focus();
+            }
+        });
 
         // End session
         endBtn.addEventListener('click', async () => {
@@ -531,10 +717,9 @@
         });
 
         // Initialize
-        connectWebSocket();
+        initializeSession();
 
-        // Add initial bot message (will be sent by server)
-        // The server sends the initial greeting, so we'll receive it via WebSocket
+        // Voice mode receives history via WebSocket; text mode loads it from /session-state.
     </script>
 </body>
 </html>

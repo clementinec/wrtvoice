@@ -210,6 +210,47 @@
             color: #999;
             font-size: 12px;
         }
+
+        .mode-selector {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 16px;
+            text-align: left;
+        }
+
+        .mode-option {
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .mode-option:has(input:checked) {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .mode-option input {
+            margin-right: 8px;
+        }
+
+        .mode-title {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .mode-hint {
+            color: #777;
+            display: block;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+
+        .voice-settings.hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -238,7 +279,20 @@
             <div class="loading-text" id="loadingText">Processing PDF...</div>
         </div>
 
-        <div style="margin-top: 16px; text-align: left;">
+        <div class="mode-selector" aria-label="Session mode">
+            <label class="mode-option">
+                <input type="radio" name="sessionMode" value="text" checked>
+                <span class="mode-title">Text chat</span>
+                <span class="mode-hint">No microphone or Whisper required.</span>
+            </label>
+            <label class="mode-option">
+                <input type="radio" name="sessionMode" value="voice">
+                <span class="mode-title">Voice</span>
+                <span class="mode-hint">Uses the server machine microphone.</span>
+            </label>
+        </div>
+
+        <div class="voice-settings hidden" id="voiceSettings" style="margin-top: 16px; text-align: left;">
             <label style="color: #666; font-size: 14px; display: block; margin-bottom: 8px;">
                 Pause detection timeout (seconds):
             </label>
@@ -271,8 +325,21 @@
         const successMsg = document.getElementById('successMsg');
         const ollamaStatus = document.getElementById('ollamaStatus');
         const ollamaText = document.getElementById('ollamaText');
+        const modeInputs = document.querySelectorAll('input[name="sessionMode"]');
+        const voiceSettings = document.getElementById('voiceSettings');
 
         let uploadedFile = null;
+
+        function selectedMode() {
+            return document.querySelector('input[name="sessionMode"]:checked').value;
+        }
+
+        function updateModeUI() {
+            voiceSettings.classList.toggle('hidden', selectedMode() !== 'voice');
+        }
+
+        modeInputs.forEach((input) => input.addEventListener('change', updateModeUI));
+        updateModeUI();
 
         // Check Ollama status on load
         async function checkHealth() {
@@ -377,7 +444,10 @@
         // Start session
         startBtn.addEventListener('click', async () => {
             loading.classList.add('visible');
-            loadingText.textContent = 'Initializing Whisper model and session...';
+            const mode = selectedMode();
+            loadingText.textContent = mode === 'voice'
+                ? 'Initializing Whisper model and session...'
+                : 'Starting text chat session...';
             startBtn.disabled = true;
             errorMsg.classList.remove('visible');
 
@@ -388,6 +458,7 @@
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
+                        mode: mode,
                         whisper_model: 'base',
                         phrase_timeout: phraseTimeout
                     })
@@ -397,7 +468,7 @@
 
                 if (response.ok) {
                     // Redirect to conversation page
-                    window.location.href = '/conversation';
+                    window.location.href = `/conversation?mode=${encodeURIComponent(data.mode || mode)}`;
                 } else {
                     showError(data.detail || 'Error starting session');
                     startBtn.disabled = false;

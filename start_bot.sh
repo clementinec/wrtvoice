@@ -42,15 +42,21 @@ fi
 # Check Python dependencies
 echo ""
 echo "Checking Python dependencies..."
-if python3 -c "import fastapi, uvicorn, whisper, speech_recognition, PyPDF2, pyttsx3" 2>/dev/null; then
-    echo "✓ All Python dependencies installed"
+if python3 -c "import fastapi, uvicorn, aiohttp, requests, PyPDF2; import multipart" 2>/dev/null; then
+    echo "✓ Web/text dependencies installed"
 else
     echo "✗ Missing dependencies!"
     echo ""
     echo "Please install dependencies:"
-    echo "  pip install -r requirements.txt"
     echo "  pip install -r requirements_web.txt"
     exit 1
+fi
+
+if python3 -c "import whisper, speech_recognition, pyaudio, torch, numpy" 2>/dev/null; then
+    echo "✓ Voice dependencies installed"
+else
+    echo "Voice dependencies not found; text mode will still work."
+    echo "Install requirements.txt or requirements_all.txt to enable voice mode."
 fi
 
 # Create necessary directories

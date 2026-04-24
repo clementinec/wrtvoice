@@ -8,11 +8,9 @@ import numpy as np
 import speech_recognition as sr
 import whisper
 import torch
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from queue import Queue
 from typing import Optional, Callable, Dict
-from sys import platform
-import threading
 
 
 class WhisperSTT:
@@ -53,7 +51,7 @@ class WhisperSTT:
         self.phrase_bytes = bytes()
         self.phrase_time = None  # Last time we received audio
         self.is_running = False
-        self.listener_thread = None
+        self.stop_background_listener = None
 
         # Callbacks
         self.on_transcription: Optional[Callable] = None
@@ -105,7 +103,7 @@ class WhisperSTT:
             return
 
         # Start background listener
-        self.recorder.listen_in_background(
+        self.stop_background_listener = self.recorder.listen_in_background(
             self.source,
             self._record_callback,
             phrase_time_limit=self.record_timeout
@@ -116,6 +114,9 @@ class WhisperSTT:
 
     def stop_listening(self) -> None:
         """Stop background listening."""
+        if self.stop_background_listener:
+            self.stop_background_listener(wait_for_stop=False)
+            self.stop_background_listener = None
         self.is_running = False
         print("Stopped listening.")
 
@@ -139,8 +140,12 @@ class WhisperSTT:
 
         if has_new_audio:
             # Get new audio from queue
-            audio_data = b''.join(self.data_queue.queue)
-            self.data_queue.queue.clear()
+            audio_chunks = []
+            while not self.data_queue.empty():
+                audio_chunks.append(self.data_queue.get())
+            audio_data = b''.join(audio_chunks)
+            if not audio_data:
+                return None
 
             # Update timestamp - marks when we LAST received audio
             self.phrase_time = now

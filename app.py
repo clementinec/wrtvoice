@@ -12,19 +12,21 @@ import asyncio
 import os
 import shutil
 from datetime import datetime, timezone
-from typing import Optional
 
 from modules.pdf_parser import PDFParser
 from modules.ollama_client import OllamaClient
-from modules.whisper_stt import WhisperSTT
-from modules.tts_engine import TTSEngine
 from modules.conversation_manager import ConversationManager
 
 
 # Request models
 class SessionStartRequest(BaseModel):
+    mode: str = "voice"
     whisper_model: str = "base"
     phrase_timeout: float = 5.0  # Default 5 seconds
+
+
+class MessageRequest(BaseModel):
+    text: str
 
 
 app = FastAPI(title="Socratic Method Bot")
@@ -35,7 +37,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Global instances
 conversation_manager = ConversationManager(storage_dir="conversations")
 ollama_client = OllamaClient()
-# tts_engine = TTSEngine(rate=160, volume=0.9)  # Disabled for now (haunting voice)
 
 # Session state
 current_session = {
@@ -43,8 +44,60 @@ current_session = {
     "pdf_context": "",
     "pdf_metadata": {},
     "session_active": False,
+    "mode": "voice",
     "whisper_stt": None
 }
+
+SESSION_MODES = {"voice", "text"}
+
+
+def normalize_session_mode(mode: str) -> str:
+    """Normalize and validate the requested interaction mode."""
+    normalized = (mode or "voice").strip().lower()
+    if normalized not in SESSION_MODES:
+        raise HTTPException(status_code=400, detail="Session mode must be 'voice' or 'text'")
+    return normalized
+
+
+def get_whisper_stt_class():
+    """Import Whisper lazily so text-only sessions do not require audio dependencies."""
+    try:
+        from modules.whisper_stt import WhisperSTT
+        return WhisperSTT
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Voice mode is unavailable because Whisper/audio dependencies are not installed. "
+                "Install requirements.txt or requirements_all.txt to enable voice sessions."
+            )
+        ) from exc
+
+
+def stop_active_voice_session() -> None:
+    """Stop any active Whisper listener before replacing or ending a session."""
+    whisper_stt = current_session.get("whisper_stt")
+    if whisper_stt:
+        whisper_stt.stop_listening()
+        current_session["whisper_stt"] = None
+
+
+async def generate_bot_response(student_text: str, on_chunk=None) -> str:
+    """Generate the bot response with the shared Socratic prompt path."""
+    conversation_history = conversation_manager.get_conversation_history(last_n=10)
+    full_response = ""
+
+    async for chunk in ollama_client.generate_socratic_response_stream(
+        student_input=student_text,
+        pdf_context=current_session["pdf_context"],
+        conversation_history=conversation_history
+    ):
+        if chunk:
+            full_response += chunk
+            if on_chunk:
+                await on_chunk(chunk)
+
+    return full_response.strip()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -68,7 +121,8 @@ async def health_check():
         "status": "healthy",
         "ollama_connected": ollama_status,
         "pdf_uploaded": current_session["pdf_uploaded"],
-        "session_active": current_session["session_active"]
+        "session_active": current_session["session_active"],
+        "mode": current_session["mode"]
     }
 
 
@@ -121,12 +175,13 @@ async def upload_pdf(file: UploadFile = File(...)):
 @app.post("/start-session")
 async def start_session(request: SessionStartRequest):
     """
-    Initialize conversation session with Ollama and Whisper.
+    Initialize conversation session with Ollama and optional Whisper voice input.
     """
+    mode = normalize_session_mode(request.mode)
     whisper_model = request.whisper_model
     phrase_timeout = request.phrase_timeout
 
-    print(f"[SESSION] Starting session with phrase_timeout={phrase_timeout}s from slider (model={whisper_model})")
+    print(f"[SESSION] Starting {mode} session (model={whisper_model}, phrase_timeout={phrase_timeout}s)")
 
     if not current_session["pdf_uploaded"]:
         raise HTTPException(status_code=400, detail="No PDF uploaded")
@@ -135,6 +190,9 @@ async def start_session(request: SessionStartRequest):
         # Check Ollama connection
         if not ollama_client.check_connection():
             raise HTTPException(status_code=503, detail="Ollama server not available")
+
+        WhisperSTT = get_whisper_stt_class() if mode == "voice" else None
+        stop_active_voice_session()
 
         # Start conversation session
         session_id = conversation_manager.start_session(
@@ -149,26 +207,76 @@ async def start_session(request: SessionStartRequest):
         # Add to conversation
         conversation_manager.add_message('bot', bot_message)
 
-        # Initialize Whisper STT with user-specified timeout from slider
-        print(f"[WHISPER] Initializing with phrase_timeout={phrase_timeout}s")
-        current_session["whisper_stt"] = WhisperSTT(
-            model=whisper_model,
-            phrase_timeout=phrase_timeout,  # From slider on upload page
-            record_timeout=2.0,
-            debug=True  # Enable debug logging to track timing issues
-        )
-        print(f"[WHISPER] Initialized. Timeout value in STT: {current_session['whisper_stt'].phrase_timeout}s")
+        if mode == "voice":
+            # Initialize Whisper STT with user-specified timeout from slider
+            print(f"[WHISPER] Initializing with phrase_timeout={phrase_timeout}s")
+            current_session["whisper_stt"] = WhisperSTT(
+                model=whisper_model,
+                phrase_timeout=phrase_timeout,  # From slider on upload page
+                record_timeout=2.0,
+                debug=False
+            )
+            print(f"[WHISPER] Initialized. Timeout value in STT: {current_session['whisper_stt'].phrase_timeout}s")
+        else:
+            current_session["whisper_stt"] = None
 
         current_session["session_active"] = True
+        current_session["mode"] = mode
 
         return {
             "success": True,
             "session_id": session_id,
+            "mode": mode,
             "initial_message": bot_message
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error starting session: {str(e)}")
+
+
+@app.get("/session-state")
+async def session_state():
+    """Return the current in-memory session state for the browser UI."""
+    return {
+        "pdf_uploaded": current_session["pdf_uploaded"],
+        "session_active": current_session["session_active"],
+        "mode": current_session["mode"],
+        "metadata": current_session["pdf_metadata"],
+        "conversation": conversation_manager.get_conversation_history()
+        if current_session["session_active"]
+        else []
+    }
+
+
+@app.post("/message")
+async def send_text_message(request: MessageRequest):
+    """
+    Submit a typed student message and return the Socratic response.
+    """
+    if not current_session["session_active"]:
+        raise HTTPException(status_code=400, detail="No active session")
+
+    text = request.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Message text is required")
+
+    if not ollama_client.check_connection():
+        raise HTTPException(status_code=503, detail="Ollama server not available")
+
+    try:
+        student_message = conversation_manager.add_message('student', text)
+        bot_text = await generate_bot_response(text)
+        bot_message = conversation_manager.add_message('bot', bot_text)
+
+        return {
+            "success": True,
+            "student_message": student_message,
+            "bot_message": bot_message
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating response: {str(e)}")
 
 
 @app.websocket("/ws/conversation")
@@ -180,14 +288,19 @@ async def websocket_conversation(websocket: WebSocket):
     await websocket.accept()
 
     if not current_session["session_active"]:
-        await websocket.send_json({"error": "No active session"})
+        await websocket.send_json({"type": "error", "message": "No active session"})
+        await websocket.close()
+        return
+
+    if current_session["mode"] != "voice":
+        await websocket.send_json({"type": "error", "message": "Current session is not in voice mode"})
         await websocket.close()
         return
 
     whisper_stt = current_session["whisper_stt"]
 
     if not whisper_stt:
-        await websocket.send_json({"error": "Whisper not initialized"})
+        await websocket.send_json({"type": "error", "message": "Whisper not initialized"})
         await websocket.close()
         return
 
@@ -255,27 +368,17 @@ async def websocket_conversation(websocket: WebSocket):
                     # Send "analyzing" status
                     await websocket.send_json({"type": "status", "status": "analyzing"})
 
-                    # Generate Socratic response
-                    conversation_history = conversation_manager.get_conversation_history(last_n=10)
-
                     # Send "responding" status before streaming
                     await websocket.send_json({"type": "status", "status": "responding"})
 
-                    # Stream response from Ollama word-by-word
-                    full_response = ""
-                    async for chunk in ollama_client.generate_socratic_response_stream(
-                        student_input=text,
-                        pdf_context=current_session["pdf_context"],
-                        conversation_history=conversation_history
-                    ):
-                        if chunk:
-                            full_response += chunk
-                            # Send incremental response
-                            await websocket.send_json({
-                                "type": "bot_response_chunk",
-                                "chunk": chunk,
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            })
+                    async def send_chunk(chunk):
+                        await websocket.send_json({
+                            "type": "bot_response_chunk",
+                            "chunk": chunk,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+
+                    full_response = await generate_bot_response(text, on_chunk=send_chunk)
 
                     # Send completion signal
                     await websocket.send_json({
@@ -286,9 +389,6 @@ async def websocket_conversation(websocket: WebSocket):
 
                     # Add bot response to conversation
                     conversation_manager.add_message('bot', full_response)
-
-                    # TTS disabled for now (haunting voice)
-                    # tts_engine.speak_async(full_response)
 
                     # Return to listening status
                     await websocket.send_json({"type": "status", "status": "listening"})
@@ -342,9 +442,7 @@ async def end_session():
         text_filepath = conversation_manager.export_as_text()
 
         # Clean up
-        if current_session["whisper_stt"]:
-            current_session["whisper_stt"].stop_listening()
-            current_session["whisper_stt"] = None
+        stop_active_voice_session()
 
         current_session["session_active"] = False
 
@@ -385,8 +483,11 @@ async def get_session(session_id: str):
 async def list_microphones():
     """List available microphone devices."""
     try:
+        WhisperSTT = get_whisper_stt_class()
         mics = WhisperSTT.list_microphones()
         return {"microphones": [{"index": idx, "name": name} for idx, name in mics]}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
