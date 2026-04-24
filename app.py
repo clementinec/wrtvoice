@@ -86,6 +86,21 @@ def stop_active_voice_session() -> None:
         current_session["whisper_stt"] = None
 
 
+def reset_runtime_session() -> None:
+    """Clear active runtime state so one session cannot leak into the next."""
+    stop_active_voice_session()
+    current_session.update({
+        "pdf_uploaded": False,
+        "pdf_context": "",
+        "pdf_metadata": {},
+        "pdf_context_stats": {},
+        "session_active": False,
+        "mode": "voice",
+        "whisper_stt": None
+    })
+    conversation_manager.reset()
+
+
 def public_context_stats(context_stats: dict) -> dict:
     """Return context metadata without echoing essay text to the browser."""
     return {key: value for key, value in context_stats.items() if key != "text"}
@@ -200,6 +215,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         current_session["pdf_uploaded"] = True
         current_session["pdf_context"] = pdf_context
         current_session["pdf_metadata"] = pdf_metadata
+        current_session["session_active"] = False
         current_session["pdf_metadata"]["filename"] = file.filename
         current_session["pdf_metadata"]["words_extracted"] = context_summary["words_extracted"]
         current_session["pdf_metadata"]["total_words"] = context_summary["total_words"]
@@ -248,9 +264,11 @@ async def start_session(request: SessionStartRequest):
         stop_active_voice_session()
 
         # Start conversation session
+        session_metadata = dict(current_session["pdf_metadata"])
+        session_metadata["mode"] = mode
         session_id = conversation_manager.start_session(
             pdf_context=current_session["pdf_context"],
-            pdf_metadata=current_session["pdf_metadata"]
+            pdf_metadata=session_metadata
         )
 
         # Get initial bot greeting from Ollama
@@ -364,6 +382,15 @@ async def websocket_conversation(websocket: WebSocket):
         await websocket.close()
         return
 
+    def pause_voice_recording():
+        # Stop recording before LLM work so responding/analyzing audio cannot enter the next turn.
+        whisper_stt.stop_listening(clear_audio_queue=True)
+
+    def resume_voice_recording():
+        if current_session["session_active"] and current_session["mode"] == "voice":
+            whisper_stt.clear_audio_queue()
+            whisper_stt.start_listening()
+
     # Start listening
     whisper_stt.start_listening()
 
@@ -405,6 +432,7 @@ async def websocket_conversation(websocket: WebSocket):
 
                 # Handle phrase complete
                 elif result.get('phrase_complete'):
+                    pause_voice_recording()
                     text = result['text']
 
                     # Skip empty phrases
@@ -412,6 +440,7 @@ async def websocket_conversation(websocket: WebSocket):
                         await websocket.send_json({"type": "status", "status": "listening"})
                         current_student_text = ""
                         last_pausing_time = None
+                        resume_voice_recording()
                         continue
 
                     # Send final transcription ONLY (no duplicate live transcription)
@@ -454,6 +483,7 @@ async def websocket_conversation(websocket: WebSocket):
                     await websocket.send_json({"type": "status", "status": "listening"})
                     current_student_text = ""
                     last_pausing_time = None
+                    resume_voice_recording()
 
                 # Handle live transcription update (user is speaking)
                 else:
@@ -500,18 +530,17 @@ async def end_session():
 
         # Export as text
         text_filepath = conversation_manager.export_as_text()
+        message_count = len(conversation_manager.conversation)
 
         # Clean up
-        stop_active_voice_session()
-
-        current_session["session_active"] = False
+        reset_runtime_session()
 
         return {
             "success": True,
             "message": "Session ended",
             "json_file": filepath,
             "text_file": text_filepath,
-            "message_count": len(conversation_manager.conversation)
+            "message_count": message_count
         }
 
     except Exception as e:
@@ -528,12 +557,13 @@ async def list_sessions():
 @app.get("/sessions/{session_id}")
 async def get_session(session_id: str):
     """Get details of a specific session."""
-    if conversation_manager.load_session(session_id):
+    session = conversation_manager.read_session(session_id)
+    if session:
         return {
-            "session_id": conversation_manager.session_id,
-            "pdf_context": conversation_manager.pdf_context,
-            "conversation": conversation_manager.conversation,
-            "metadata": conversation_manager.pdf_metadata
+            "session_id": session.get("session_id"),
+            "pdf_context": session.get("pdf_context", ""),
+            "conversation": session.get("conversation", []),
+            "metadata": session.get("pdf_metadata", {})
         }
     else:
         raise HTTPException(status_code=404, detail="Session not found")

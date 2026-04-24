@@ -43,13 +43,21 @@ class ConversationManager:
         """
         # Use timezone-aware UTC to avoid local/UTC mismatches
         self.session_start = datetime.now(timezone.utc)
-        self.session_id = self.session_start.strftime("%Y-%m-%d_%H-%M-%S")
+        self.session_id = self.session_start.strftime("%Y-%m-%d_%H-%M-%S-%f")
         self.pdf_context = pdf_context
         self.pdf_metadata = pdf_metadata or {}
         self.conversation = []
 
         print(f"Started session: {self.session_id}")
         return self.session_id
+
+    def reset(self) -> None:
+        """Clear the active in-memory session without deleting saved files."""
+        self.session_id = None
+        self.pdf_context = ""
+        self.pdf_metadata = {}
+        self.conversation = []
+        self.session_start = None
 
     def add_message(
         self,
@@ -197,6 +205,28 @@ class ConversationManager:
         except Exception as e:
             print(f"Error loading session: {e}")
             return False
+
+    def read_session(self, session_id: str) -> Optional[Dict]:
+        """
+        Read a saved session without mutating the active in-memory session.
+
+        Args:
+            session_id: Session ID to read
+
+        Returns:
+            Saved session dictionary if found, otherwise None
+        """
+        filepath = os.path.join(self.storage_dir, f"{session_id}.json")
+
+        if not os.path.exists(filepath):
+            return None
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error reading session: {e}")
+            return None
 
     def list_sessions(self) -> List[Dict]:
         """

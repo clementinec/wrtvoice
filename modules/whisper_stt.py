@@ -112,13 +112,25 @@ class WhisperSTT:
         self.is_running = True
         print("Started listening...")
 
-    def stop_listening(self) -> None:
-        """Stop background listening."""
+    def stop_listening(self, clear_audio_queue: bool = False) -> None:
+        """
+        Stop background listening.
+
+        Args:
+            clear_audio_queue: Drop queued raw audio that should not be processed.
+        """
         if self.stop_background_listener:
             self.stop_background_listener(wait_for_stop=False)
             self.stop_background_listener = None
         self.is_running = False
+        if clear_audio_queue:
+            self.clear_audio_queue()
         print("Stopped listening.")
+
+    def clear_audio_queue(self) -> None:
+        """Drop queued raw audio without clearing the current phrase buffer."""
+        while not self.data_queue.empty():
+            self.data_queue.get()
 
     def process_audio_queue(self) -> Optional[Dict]:
         """
