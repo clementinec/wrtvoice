@@ -3,20 +3,20 @@
 ## Prerequisites Check
 
 ✅ **Ollama installed**: `/usr/local/bin/ollama`
-✅ **llama3.1:latest available**: 4.7 GB (8B parameters)
-✅ **Whisper from demo**: Already in `transcribe_demo.py`
+✅ **Ollama model available**: `gemma4:e4b` preferred, `qwen3:14b` recommended for stronger tutoring
+✅ **Whisper/PyAudio**: Optional; only needed for voice mode
 
 ## Installation (One-time)
 
 ```bash
-# 1. Install new dependencies
-pip install -r requirements_web.txt
+# 1. Install text-mode dependencies
+./install_dependencies.sh
 
-# 2. Install FFmpeg if needed (macOS)
-brew install ffmpeg
+# Optional: install voice dependencies later
+./install_dependencies.sh --voice
 
-# 3. Install PyAudio dependencies (macOS)
-brew install portaudio
+# Optional manual macOS voice-mode system package
+env -u HOMEBREW_BOTTLE_DOMAIN -u HOMEBREW_API_DOMAIN HOMEBREW_NO_AUTO_UPDATE=1 brew install portaudio
 ```
 
 ## Running the Application
@@ -37,24 +37,33 @@ ollama serve
 python app.py
 ```
 
+To use a different installed Ollama model:
+
+```bash
+OLLAMA_MODEL=<model-name> ./start_bot.sh
+```
+
+You can also choose an installed Ollama model from the upload page before
+starting a session.
+
 ## Usage Flow
 
 1. **Open Browser**: Navigate to `http://localhost:8000`
 
 2. **Upload PDF**:
    - Click the upload area or drag & drop your essay PDF
-   - First 500 words are automatically extracted
+   - Up to the first 5,000 words are automatically extracted
 
 3. **Start Session**:
+   - Choose Text editing for typed revision help, or Voice for microphone practice
    - Click "Start Session" button
-   - Whisper model loads (one-time, ~30 seconds)
-   - Bot greets you with initial question
+   - Text mode starts immediately once Ollama is ready
+   - Voice mode loads Whisper first (one-time, ~30 seconds)
 
 4. **Engage in Dialogue**:
-   - Speak into your microphone
-   - Bot listens and transcribes in real-time
-   - After 3 seconds of silence → Bot responds
-   - Response is spoken aloud automatically
+   - In text mode, type an editing request or use a prompt button
+   - In voice mode, speak into the server machine microphone
+   - After the configured pause timeout, the bot responds in the chat
 
 5. **End Session**:
    - Click "End Session" when done
@@ -146,7 +155,6 @@ Your custom instructions here...
 ✅ **100% Local Processing**
 - Whisper runs locally (no OpenAI API)
 - Ollama runs locally (no external LLM calls)
-- TTS runs locally (pyttsx3)
 
 ✅ **Reuses Existing Code**
 - Phrase splitting from `transcribe_demo.py:102-104`

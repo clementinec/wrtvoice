@@ -10,6 +10,7 @@ import whisper
 import torch
 from datetime import datetime, timezone
 from queue import Queue
+import threading
 from typing import Optional, Callable, Dict
 
 
@@ -23,6 +24,8 @@ class WhisperSTT:
         energy_threshold: int = 1000,
         record_timeout: float = 2,
         phrase_timeout: float = 5.0,  # Default 5 seconds
+        finalization_grace: float = 0.75,
+        final_silence_padding: float = 0.8,
         device_index: Optional[int] = None,
         debug: bool = False
     ):
@@ -35,6 +38,8 @@ class WhisperSTT:
             energy_threshold: Mic energy level for detection
             record_timeout: How real-time the recording is (seconds)
             phrase_timeout: Silence duration before new phrase (seconds)
+            finalization_grace: Extra time to wait for a final callback chunk
+            final_silence_padding: Silence appended before final transcription
             device_index: Microphone device index (None for default)
             debug: Enable debug logging
         """
@@ -43,6 +48,8 @@ class WhisperSTT:
         self.energy_threshold = energy_threshold
         self.record_timeout = record_timeout
         self.phrase_timeout = phrase_timeout
+        self.finalization_grace = finalization_grace
+        self.final_silence_padding = final_silence_padding
         self.device_index = device_index
         self.debug = debug
 
@@ -50,7 +57,11 @@ class WhisperSTT:
         self.data_queue = Queue()
         self.phrase_bytes = bytes()
         self.phrase_time = None  # Last time we received audio
+        self.finalizing_since = None
+        self.final_transcription_pending = False
+        self.last_partial_text = ""
         self.is_running = False
+        self.listener_lock = threading.Lock()
         self.stop_background_listener = None
 
         # Callbacks
@@ -98,19 +109,20 @@ class WhisperSTT:
 
     def start_listening(self) -> None:
         """Start background listening thread."""
-        if self.is_running:
-            print("Already listening.")
-            return
+        with self.listener_lock:
+            if self.is_running:
+                print("Already listening.")
+                return
 
-        # Start background listener
-        self.stop_background_listener = self.recorder.listen_in_background(
-            self.source,
-            self._record_callback,
-            phrase_time_limit=self.record_timeout
-        )
+            # Start background listener
+            self.stop_background_listener = self.recorder.listen_in_background(
+                self.source,
+                self._record_callback,
+                phrase_time_limit=self.record_timeout
+            )
 
-        self.is_running = True
-        print("Started listening...")
+            self.is_running = True
+            print("Started listening...")
 
     def stop_listening(self, clear_audio_queue: bool = False) -> None:
         """
@@ -119,10 +131,11 @@ class WhisperSTT:
         Args:
             clear_audio_queue: Drop queued raw audio that should not be processed.
         """
-        if self.stop_background_listener:
-            self.stop_background_listener(wait_for_stop=False)
-            self.stop_background_listener = None
-        self.is_running = False
+        with self.listener_lock:
+            if self.stop_background_listener:
+                self.stop_background_listener(wait_for_stop=True)
+                self.stop_background_listener = None
+            self.is_running = False
         if clear_audio_queue:
             self.clear_audio_queue()
         print("Stopped listening.")
@@ -131,6 +144,54 @@ class WhisperSTT:
         """Drop queued raw audio without clearing the current phrase buffer."""
         while not self.data_queue.empty():
             self.data_queue.get()
+
+    def _drain_audio_queue(self) -> bytes:
+        """Collect all queued raw audio chunks into one byte string."""
+        audio_chunks = []
+        while not self.data_queue.empty():
+            audio_chunks.append(self.data_queue.get())
+        return b''.join(audio_chunks)
+
+    def _transcribe_phrase(self, audio_bytes: bytes, pad_silence: bool = False) -> str:
+        """Transcribe raw int16 phrase audio, optionally padding the final pass."""
+        audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+
+        if pad_silence and self.final_silence_padding > 0:
+            silence = np.zeros(int(16000 * self.final_silence_padding), dtype=np.float32)
+            audio_np = np.concatenate([audio_np, silence])
+
+        return self.audio_model.transcribe(
+            audio_np,
+            fp16=torch.cuda.is_available()
+        )['text'].strip()
+
+    @staticmethod
+    def _choose_final_text(final_text: str, partial_text: str) -> str:
+        """
+        Avoid replacing a richer live transcript with a shorter final transcript.
+
+        Whisper can occasionally drop the tail on the final pass, especially when
+        the audio ends right after speech. If the final text is clearly a prefix
+        of the last live partial, keep the partial.
+        """
+        final_text = (final_text or "").strip()
+        partial_text = (partial_text or "").strip()
+
+        if not partial_text:
+            return final_text
+        if not final_text:
+            return partial_text
+
+        normalized_final = " ".join(final_text.lower().split())
+        normalized_partial = " ".join(partial_text.lower().split())
+
+        if normalized_partial.startswith(normalized_final) and len(partial_text) > len(final_text):
+            return partial_text
+
+        if len(final_text) < len(partial_text) * 0.85 and normalized_final in normalized_partial:
+            return partial_text
+
+        return final_text
 
     def process_audio_queue(self) -> Optional[Dict]:
         """
@@ -152,22 +213,21 @@ class WhisperSTT:
 
         if has_new_audio:
             # Get new audio from queue
-            audio_chunks = []
-            while not self.data_queue.empty():
-                audio_chunks.append(self.data_queue.get())
-            audio_data = b''.join(audio_chunks)
+            audio_data = self._drain_audio_queue()
             if not audio_data:
                 return None
 
             # Update timestamp - marks when we LAST received audio
             self.phrase_time = now
+            self.finalizing_since = None
+            self.final_transcription_pending = False
 
             # Accumulate audio
             self.phrase_bytes += audio_data
 
             # Transcribe current accumulated audio
-            audio_np = np.frombuffer(self.phrase_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-            text = self.audio_model.transcribe(audio_np, fp16=torch.cuda.is_available())['text'].strip()
+            text = self._transcribe_phrase(self.phrase_bytes)
+            self.last_partial_text = text
 
             if self.debug:
                 print(f"[DEBUG] New audio received, transcribed: '{text[:50]}...'")
@@ -199,16 +259,70 @@ class WhisperSTT:
 
         # THIRD: Check if countdown finished (timeout reached)
         if time_since_stopped >= self.phrase_timeout:
+            if self.finalizing_since is None:
+                self.finalizing_since = now
+                if self.debug:
+                    print("[DEBUG] Timeout reached, waiting briefly for final audio callback.")
+                return {
+                    'text': '',
+                    'phrase_complete': False,
+                    'pausing': True,
+                    'time_remaining': 0,
+                    'timestamp': now
+                }
+
+            grace_elapsed = (now - self.finalizing_since).total_seconds()
+            if grace_elapsed < self.finalization_grace:
+                return {
+                    'text': '',
+                    'phrase_complete': False,
+                    'pausing': True,
+                    'time_remaining': 0,
+                    'timestamp': now
+                }
+
+            late_audio = self._drain_audio_queue()
+            if late_audio:
+                if self.debug:
+                    print("[DEBUG] Late audio arrived during finalization grace; continuing phrase.")
+                self.phrase_time = now
+                self.finalizing_since = None
+                self.final_transcription_pending = False
+                self.phrase_bytes += late_audio
+                text = self._transcribe_phrase(self.phrase_bytes)
+                self.last_partial_text = text
+                return {
+                    'text': text,
+                    'phrase_complete': False,
+                    'pausing': False,
+                    'time_remaining': self.phrase_timeout,
+                    'timestamp': now
+                }
+
+            if not self.final_transcription_pending:
+                self.final_transcription_pending = True
+                return {
+                    'text': '',
+                    'phrase_complete': False,
+                    'pausing': True,
+                    'finalizing': True,
+                    'time_remaining': 0,
+                    'timestamp': now
+                }
+
             if self.debug:
                 print(f"[DEBUG] ✓ Phrase complete! Timeout reached.")
 
             # Transcribe final phrase
-            audio_np = np.frombuffer(self.phrase_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-            final_text = self.audio_model.transcribe(audio_np, fp16=torch.cuda.is_available())['text'].strip()
+            final_text = self._transcribe_phrase(self.phrase_bytes, pad_silence=True)
+            final_text = self._choose_final_text(final_text, self.last_partial_text)
 
             # Reset state
             self.phrase_bytes = bytes()
             self.phrase_time = None
+            self.finalizing_since = None
+            self.final_transcription_pending = False
+            self.last_partial_text = ""
 
             result = {
                 'text': final_text,

@@ -5,13 +5,16 @@ FastAPI server for real-time transcription and Socratic dialogue.
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 import asyncio
+import json
 import os
 import shutil
+import time
 from datetime import datetime, timezone
+from typing import Optional
 
 from modules.pdf_parser import PDFParser
 from modules.ollama_client import OllamaClient
@@ -19,11 +22,13 @@ from modules.conversation_manager import ConversationManager
 
 
 PDF_CONTEXT_WORD_LIMIT = 5000
+SOCRATIC_CONTEXT_WORD_LIMIT = 800
 
 
 # Request models
 class SessionStartRequest(BaseModel):
     mode: str = "voice"
+    ollama_model: Optional[str] = None
     whisper_model: str = "base"
     phrase_timeout: float = 5.0  # Default 5 seconds
 
@@ -49,10 +54,17 @@ current_session = {
     "pdf_context_stats": {},
     "session_active": False,
     "mode": "voice",
+    "ollama_model": ollama_client.model,
     "whisper_stt": None
 }
 
 SESSION_MODES = {"voice", "text"}
+RECOMMENDED_OLLAMA_MODELS = [
+    "gemma4:e4b",
+    "qwen3:14b",
+    "gemma3:12b",
+    "llama3.1:latest",
+]
 
 
 def normalize_session_mode(mode: str) -> str:
@@ -60,6 +72,14 @@ def normalize_session_mode(mode: str) -> str:
     normalized = (mode or "voice").strip().lower()
     if normalized not in SESSION_MODES:
         raise HTTPException(status_code=400, detail="Session mode must be 'voice' or 'text'")
+    return normalized
+
+
+def normalize_ollama_model(model: Optional[str]) -> str:
+    """Normalize the requested Ollama model name."""
+    normalized = (model or ollama_client.model or OllamaClient.DEFAULT_MODEL).strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Ollama model is required")
     return normalized
 
 
@@ -96,6 +116,7 @@ def reset_runtime_session() -> None:
         "pdf_context_stats": {},
         "session_active": False,
         "mode": "voice",
+        "ollama_model": ollama_client.model,
         "whisper_stt": None
     })
     conversation_manager.reset()
@@ -124,26 +145,82 @@ def pdf_extraction_error(context_summary: dict) -> str:
     return "No readable text found in PDF"
 
 
-async def generate_bot_response(student_text: str, on_chunk=None) -> str:
-    """Generate a mode-appropriate bot response."""
-    conversation_history = conversation_manager.get_conversation_history(last_n=10)
-    full_response = ""
+def ollama_model_hint(model: Optional[str] = None) -> str:
+    """Return a command hint for installing the configured Ollama model."""
+    model_name = model or ollama_client.model
+    return f"Run `ollama pull {model_name}` or choose an installed model."
+
+
+def ensure_ollama_ready(model: Optional[str] = None) -> None:
+    """Raise a user-actionable error when Ollama cannot serve this app."""
+    model_name = normalize_ollama_model(model)
+    if not ollama_client.check_connection():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Ollama server not available at {ollama_client.base_url}. Start it with `ollama serve`."
+        )
+
+    if not ollama_client.model_available(model=model_name):
+        raise HTTPException(
+            status_code=503,
+            detail=f"Ollama model '{model_name}' is not installed. {ollama_model_hint(model_name)}"
+        )
+
+
+def prompt_history_without_latest_student(student_text: str) -> list:
+    """Return recent history without duplicating the latest student turn."""
+    history = conversation_manager.get_conversation_history(last_n=10)
+    if not history:
+        return []
+
+    latest = history[-1]
+    if (
+        latest.get("speaker") == "student"
+        and latest.get("text", "").strip() == student_text.strip()
+    ):
+        return history[:-1]
+
+    return history
+
+
+def session_context_for_mode(mode: str) -> str:
+    """Return a mode-appropriate essay context slice for model calls."""
+    words = current_session["pdf_context"].split()
+    if mode == "voice":
+        return " ".join(words[:SOCRATIC_CONTEXT_WORD_LIMIT])
+    return current_session["pdf_context"]
+
+
+def active_model_context_word_count() -> int:
+    """Return the number of essay-context words sent for the active mode."""
+    return len(session_context_for_mode(current_session["mode"]).split())
+
+
+def stream_bot_response(student_text: str):
+    """Return the mode-appropriate Ollama async stream for a student turn."""
+    conversation_history = prompt_history_without_latest_student(student_text)
     mode = current_session["mode"]
+    pdf_context = session_context_for_mode(mode)
 
     if mode == "text":
-        response_stream = ollama_client.generate_editor_response_stream(
+        return ollama_client.generate_editor_response_stream(
             student_input=student_text,
-            pdf_context=current_session["pdf_context"],
-            conversation_history=conversation_history
-        )
-    else:
-        response_stream = ollama_client.generate_socratic_response_stream(
-            student_input=student_text,
-            pdf_context=current_session["pdf_context"],
+            pdf_context=pdf_context,
             conversation_history=conversation_history
         )
 
-    async for chunk in response_stream:
+    return ollama_client.generate_socratic_response_stream(
+        student_input=student_text,
+        pdf_context=pdf_context,
+        conversation_history=conversation_history
+    )
+
+
+async def generate_bot_response(student_text: str, on_chunk=None) -> str:
+    """Generate a mode-appropriate bot response, streaming chunks as they arrive."""
+    full_response = ""
+
+    async for chunk in stream_bot_response(student_text):
         if chunk:
             full_response += chunk
             if on_chunk:
@@ -168,10 +245,19 @@ async def conversation_page():
 async def health_check():
     """Health check endpoint."""
     ollama_status = ollama_client.check_connection()
+    available_models = ollama_client.available_models() if ollama_status else []
+    model_available = ollama_client.model_available(available_models) if ollama_status else False
 
     return {
         "status": "healthy",
         "ollama_connected": ollama_status,
+        "ollama_base_url": ollama_client.base_url,
+        "ollama_model": ollama_client.model,
+        "ollama_model_available": model_available,
+        "available_models": available_models,
+        "recommended_models": RECOMMENDED_OLLAMA_MODELS,
+        "default_model": OllamaClient.DEFAULT_MODEL,
+        "model_hint": ollama_model_hint(),
         "pdf_uploaded": current_session["pdf_uploaded"],
         "session_active": current_session["session_active"],
         "mode": current_session["mode"]
@@ -247,25 +333,39 @@ async def start_session(request: SessionStartRequest):
     Initialize conversation session with Ollama and optional Whisper voice input.
     """
     mode = normalize_session_mode(request.mode)
+    requested_model = normalize_ollama_model(request.ollama_model)
     whisper_model = request.whisper_model
     phrase_timeout = request.phrase_timeout
 
-    print(f"[SESSION] Starting {mode} session (model={whisper_model}, phrase_timeout={phrase_timeout}s)")
+    print(
+        f"[SESSION] Starting {mode} session "
+        f"(ollama_model={requested_model}, whisper_model={whisper_model}, "
+        f"phrase_timeout={phrase_timeout}s)"
+    )
 
     if not current_session["pdf_uploaded"]:
         raise HTTPException(status_code=400, detail="No PDF uploaded")
 
     try:
-        # Check Ollama connection
-        if not ollama_client.check_connection():
-            raise HTTPException(status_code=503, detail="Ollama server not available")
+        ensure_ollama_ready(requested_model)
+        ollama_client.set_model(requested_model)
 
         WhisperSTT = get_whisper_stt_class() if mode == "voice" else None
+        if mode == "voice" and not WhisperSTT.list_microphones():
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Voice mode is unavailable because no server-side microphones were found. "
+                    "Connect a microphone and grant microphone access to the terminal or Python app "
+                    "that runs this server, then restart wrtvoice."
+                )
+            )
         stop_active_voice_session()
 
         # Start conversation session
         session_metadata = dict(current_session["pdf_metadata"])
         session_metadata["mode"] = mode
+        session_metadata["ollama_model"] = requested_model
         session_id = conversation_manager.start_session(
             pdf_context=current_session["pdf_context"],
             pdf_metadata=session_metadata
@@ -276,6 +376,8 @@ async def start_session(request: SessionStartRequest):
             current_session["pdf_context"],
             mode=mode
         )
+        if initial_response.get("error"):
+            raise HTTPException(status_code=502, detail=initial_response.get("response", "Ollama generation failed"))
         bot_message = initial_response.get("response", "Hello! Let's discuss your essay.")
 
         # Add to conversation
@@ -296,11 +398,13 @@ async def start_session(request: SessionStartRequest):
 
         current_session["session_active"] = True
         current_session["mode"] = mode
+        current_session["ollama_model"] = requested_model
 
         return {
             "success": True,
             "session_id": session_id,
             "mode": mode,
+            "ollama_model": requested_model,
             "initial_message": bot_message
         }
 
@@ -317,8 +421,12 @@ async def session_state():
         "pdf_uploaded": current_session["pdf_uploaded"],
         "session_active": current_session["session_active"],
         "mode": current_session["mode"],
+        "ollama_model": current_session["ollama_model"],
         "metadata": current_session["pdf_metadata"],
         "context": current_session["pdf_context_stats"],
+        "active_context_words": active_model_context_word_count()
+        if current_session["session_active"]
+        else 0,
         "conversation": conversation_manager.get_conversation_history()
         if current_session["session_active"]
         else []
@@ -340,8 +448,7 @@ async def send_text_message(request: MessageRequest):
     if not text:
         raise HTTPException(status_code=400, detail="Message text is required")
 
-    if not ollama_client.check_connection():
-        raise HTTPException(status_code=503, detail="Ollama server not available")
+    ensure_ollama_ready()
 
     try:
         student_message = conversation_manager.add_message('student', text)
@@ -355,6 +462,80 @@ async def send_text_message(request: MessageRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating response: {str(e)}")
+
+
+@app.post("/message/stream")
+async def stream_text_message(request: MessageRequest):
+    """
+    Submit a typed student message and stream the editor response as NDJSON.
+    """
+    if not current_session["session_active"]:
+        raise HTTPException(status_code=400, detail="No active session")
+
+    if current_session["mode"] != "text":
+        raise HTTPException(status_code=400, detail="Typed messages are available in text mode only")
+
+    text = request.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Message text is required")
+
+    ensure_ollama_ready()
+
+    async def response_events():
+        try:
+            student_message = conversation_manager.add_message('student', text)
+            yield json.dumps({
+                "type": "student_message",
+                "student_message": student_message
+            }) + "\n"
+
+            full_response = ""
+            started_at = time.monotonic()
+            first_chunk_at = None
+            yield json.dumps({
+                "type": "status",
+                "status": "waiting_for_model",
+                "model": current_session["ollama_model"],
+                "context_words": active_model_context_word_count()
+            }) + "\n"
+
+            async for chunk in stream_bot_response(text):
+                if not chunk:
+                    continue
+                if first_chunk_at is None:
+                    first_chunk_at = time.monotonic()
+                    yield json.dumps({
+                        "type": "status",
+                        "status": "first_token",
+                        "elapsed_s": round(first_chunk_at - started_at, 2)
+                    }) + "\n"
+                full_response += chunk
+                yield json.dumps({
+                    "type": "bot_response_chunk",
+                    "chunk": chunk,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }) + "\n"
+
+            bot_message = conversation_manager.add_message('bot', full_response.strip())
+            yield json.dumps({
+                "type": "bot_response_complete",
+                "bot_message": bot_message,
+                "timing": {
+                    "first_token_s": round(first_chunk_at - started_at, 2)
+                    if first_chunk_at else None,
+                    "total_s": round(time.monotonic() - started_at, 2),
+                    "context_words": active_model_context_word_count(),
+                    "model": current_session["ollama_model"]
+                }
+            }) + "\n"
+
+        except Exception as e:
+            yield json.dumps({
+                "type": "error",
+                "message": f"Error generating response: {str(e)}"
+            }) + "\n"
+
+    return StreamingResponse(response_events(), media_type="application/x-ndjson")
 
 
 @app.websocket("/ws/conversation")
@@ -420,6 +601,14 @@ async def websocket_conversation(websocket: WebSocket):
                 # Handle pausing state (countdown)
                 if result.get('pausing'):
                     time_remaining = result.get('time_remaining', 0)
+                    if result.get('finalizing'):
+                        await websocket.send_json({
+                            "type": "status",
+                            "status": "transcribing"
+                        })
+                        last_pausing_time = datetime.now(timezone.utc)
+                        await asyncio.sleep(0.25)
+                        continue
 
                     # Only send pausing updates every 0.5s to reduce spam
                     if last_pausing_time is None or (datetime.now(timezone.utc) - last_pausing_time).total_seconds() >= 0.5:
@@ -458,22 +647,46 @@ async def websocket_conversation(websocket: WebSocket):
                     await websocket.send_json({"type": "status", "status": "analyzing"})
 
                     # Send "responding" status before streaming
-                    await websocket.send_json({"type": "status", "status": "responding"})
+                    await websocket.send_json({
+                        "type": "status",
+                        "status": "waiting_for_model",
+                        "model": current_session["ollama_model"],
+                        "context_words": active_model_context_word_count()
+                    })
 
-                    async def send_chunk(chunk):
+                    full_response = ""
+                    started_at = time.monotonic()
+                    first_chunk_at = None
+
+                    async for chunk in stream_bot_response(text):
+                        if not chunk:
+                            continue
+                        if first_chunk_at is None:
+                            first_chunk_at = time.monotonic()
+                            await websocket.send_json({
+                                "type": "status",
+                                "status": "first_token",
+                                "elapsed_s": round(first_chunk_at - started_at, 2)
+                            })
+                        full_response += chunk
                         await websocket.send_json({
                             "type": "bot_response_chunk",
                             "chunk": chunk,
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         })
 
-                    full_response = await generate_bot_response(text, on_chunk=send_chunk)
-
                     # Send completion signal
                     await websocket.send_json({
                         "type": "bot_response_complete",
                         "text": full_response,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timing": {
+                            "first_token_s": round(first_chunk_at - started_at, 2)
+                            if first_chunk_at else None,
+                            "total_s": round(time.monotonic() - started_at, 2),
+                            "context_words": active_model_context_word_count(),
+                            "model": current_session["ollama_model"]
+                        }
                     })
 
                     # Add bot response to conversation
@@ -595,7 +808,10 @@ if __name__ == "__main__":
         print("✗ WARNING: Ollama is not running!")
         print("  Start it with: ollama serve")
 
-    print("\nServer will start at: http://localhost:8000")
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "8000"))
+
+    print(f"\nServer will start at: http://{host}:{port}")
     print("Press Ctrl+C to stop\n")
 
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(app, host=host, port=port, log_level="info")

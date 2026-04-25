@@ -132,6 +132,20 @@
             cursor: not-allowed;
         }
 
+        .btn.secondary {
+            background: #eef0f5;
+            color: #333;
+            margin-top: 10px;
+        }
+
+        .btn.secondary:hover:not(:disabled) {
+            box-shadow: 0 8px 24px rgba(68, 76, 96, 0.16);
+        }
+
+        .btn.hidden {
+            display: none;
+        }
+
         .loading {
             display: none;
             margin: 24px 0;
@@ -225,6 +239,24 @@
             margin-top: 32px;
             color: #999;
             font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .footer-action {
+            background: none;
+            border: none;
+            color: #667eea;
+            cursor: pointer;
+            font: inherit;
+            font-weight: 600;
+            margin-left: 6px;
+            padding: 0;
+        }
+
+        .footer-command {
+            color: #666;
+            display: block;
+            margin-top: 4px;
         }
 
         .mode-selector {
@@ -266,6 +298,40 @@
 
         .voice-settings.hidden {
             display: none;
+        }
+
+        .model-settings {
+            margin-top: 16px;
+            text-align: left;
+        }
+
+        .model-settings label {
+            color: #666;
+            display: block;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .model-select {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            color: #333;
+            font: inherit;
+            padding: 10px 12px;
+            width: 100%;
+        }
+
+        .model-select:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+            outline: none;
+        }
+
+        .model-hint {
+            color: #777;
+            font-size: 12px;
+            line-height: 1.4;
+            margin-top: 6px;
         }
     </style>
 </head>
@@ -309,6 +375,12 @@
             </label>
         </div>
 
+        <div class="model-settings">
+            <label for="ollamaModel">LLM model</label>
+            <select class="model-select" id="ollamaModel"></select>
+            <p class="model-hint" id="modelHint">Checking installed Ollama models...</p>
+        </div>
+
         <div class="voice-settings hidden" id="voiceSettings" style="margin-top: 16px; text-align: left;">
             <label style="color: #666; font-size: 14px; display: block; margin-bottom: 8px;">
                 Pause detection timeout (seconds):
@@ -322,10 +394,12 @@
         </div>
 
         <button class="btn" id="startBtn" disabled>Start Session</button>
+        <button class="btn secondary hidden" id="resumeBtn" type="button">Resume Active Session</button>
 
         <div class="footer">
             <span class="status-indicator inactive" id="ollamaStatus"></span>
             <span id="ollamaText">Checking Ollama...</span>
+            <button class="footer-action" id="recheckBtn" type="button">Recheck</button>
         </div>
     </div>
 
@@ -343,42 +417,149 @@
         const contextNotice = document.getElementById('contextNotice');
         const ollamaStatus = document.getElementById('ollamaStatus');
         const ollamaText = document.getElementById('ollamaText');
+        const recheckBtn = document.getElementById('recheckBtn');
+        const resumeBtn = document.getElementById('resumeBtn');
         const modeInputs = document.querySelectorAll('input[name="sessionMode"]');
         const voiceSettings = document.getElementById('voiceSettings');
+        const ollamaModel = document.getElementById('ollamaModel');
+        const modelHint = document.getElementById('modelHint');
 
         let uploadedFile = null;
+        let isPdfReady = false;
+        let isOllamaReady = false;
+        let activeSessionMode = null;
+        let isBusy = false;
+        let installedModels = [];
+        let recommendedModels = ['gemma4:e4b', 'qwen3:14b', 'gemma3:12b', 'llama3.1:latest'];
+        let preferredModel = 'gemma4:e4b';
 
         function selectedMode() {
             return document.querySelector('input[name="sessionMode"]:checked').value;
+        }
+
+        function selectedOllamaModel() {
+            return ollamaModel.value || preferredModel;
         }
 
         function updateModeUI() {
             voiceSettings.classList.toggle('hidden', selectedMode() !== 'voice');
         }
 
+        function updateStartButton() {
+            startBtn.disabled = isBusy || !isPdfReady || !isOllamaReady;
+        }
+
+        function isModelInstalled(modelName) {
+            return installedModels.includes(modelName);
+        }
+
+        function uniqueModels(models) {
+            return [...new Set(models.filter(Boolean))];
+        }
+
+        function choosePreferredModel(currentValue) {
+            if (currentValue && isModelInstalled(currentValue)) {
+                return currentValue;
+            }
+            if (isModelInstalled(preferredModel)) {
+                return preferredModel;
+            }
+            const recommendedInstalled = recommendedModels.find((modelName) => isModelInstalled(modelName));
+            if (recommendedInstalled) {
+                return recommendedInstalled;
+            }
+            return installedModels[0] || preferredModel;
+        }
+
+        function renderModelSelector() {
+            const currentValue = ollamaModel.value;
+            const selected = choosePreferredModel(currentValue);
+            const models = uniqueModels([
+                ...recommendedModels,
+                ...installedModels,
+                preferredModel,
+                selected
+            ]);
+
+            ollamaModel.innerHTML = '';
+            models.forEach((modelName) => {
+                const option = document.createElement('option');
+                const installed = isModelInstalled(modelName);
+                option.value = modelName;
+                option.textContent = installed
+                    ? `${modelName} (installed)`
+                    : `${modelName} (not installed)`;
+                ollamaModel.appendChild(option);
+            });
+
+            ollamaModel.value = selected;
+            updateModelStatus();
+        }
+
+        function updateModelStatus() {
+            const modelName = selectedOllamaModel();
+            const installed = isModelInstalled(modelName);
+
+            if (installed) {
+                modelHint.textContent = `Using ${modelName} for this session.`;
+            } else {
+                modelHint.textContent = `${modelName} is not installed yet. Run: ollama pull ${modelName}`;
+            }
+
+            isOllamaReady = installedModels.length > 0 && installed;
+            updateStartButton();
+        }
+
         modeInputs.forEach((input) => input.addEventListener('change', updateModeUI));
+        ollamaModel.addEventListener('change', updateModelStatus);
         updateModeUI();
 
         // Check Ollama status on load
         async function checkHealth() {
             try {
-                const response = await fetch('/health');
+                const response = await fetch('/health', {cache: 'no-store'});
                 const data = await response.json();
 
-                if (data.ollama_connected) {
+                installedModels = data.available_models || [];
+                recommendedModels = data.recommended_models || recommendedModels;
+                preferredModel = data.default_model || data.ollama_model || preferredModel;
+                renderModelSelector();
+
+                if (data.ollama_connected && isModelInstalled(selectedOllamaModel())) {
                     ollamaStatus.className = 'status-indicator active';
-                    ollamaText.textContent = 'Ollama connected';
+                    ollamaText.textContent = `Ollama ready (${selectedOllamaModel()})`;
+                    isOllamaReady = true;
+                } else if (data.ollama_connected) {
+                    ollamaStatus.className = 'status-indicator inactive';
+                    ollamaText.textContent = `Ollama connected; selected model is not installed.`;
+                    isOllamaReady = false;
                 } else {
                     ollamaStatus.className = 'status-indicator inactive';
-                    ollamaText.textContent = 'Ollama not available';
+                    ollamaText.textContent = `Ollama not available at ${data.ollama_base_url || 'localhost:11434'}. Start it with ollama serve.`;
+                    isOllamaReady = false;
+                    installedModels = [];
+                    renderModelSelector();
                 }
+
+                activeSessionMode = data.session_active ? data.mode : null;
+                resumeBtn.classList.toggle('hidden', !activeSessionMode);
             } catch (error) {
                 ollamaStatus.className = 'status-indicator inactive';
                 ollamaText.textContent = 'Server not responding';
+                isOllamaReady = false;
+                resumeBtn.classList.add('hidden');
+            } finally {
+                updateStartButton();
             }
         }
 
         checkHealth();
+        setInterval(checkHealth, 10000);
+        recheckBtn.addEventListener('click', checkHealth);
+
+        resumeBtn.addEventListener('click', () => {
+            window.location.href = `/conversation?mode=${encodeURIComponent(activeSessionMode || 'text')}`;
+        });
 
         // Upload area click
         uploadArea.addEventListener('click', () => fileInput.click());
@@ -412,7 +593,16 @@
 
         // Handle file upload
         async function handleFile(file) {
-            if (!file.name.endsWith('.pdf')) {
+            uploadedFile = null;
+            isPdfReady = false;
+            updateStartButton();
+            successMsg.classList.remove('visible');
+            contextNotice.classList.remove('visible');
+            fileInfo.classList.remove('visible');
+            fileName.textContent = '';
+            fileDetails.textContent = '';
+
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
                 showError('Please upload a PDF file');
                 return;
             }
@@ -432,6 +622,8 @@
             // Upload to server
             loading.classList.add('visible');
             loadingText.textContent = 'Processing PDF...';
+            isBusy = true;
+            updateStartButton();
             errorMsg.classList.remove('visible');
             successMsg.classList.remove('visible');
             contextNotice.classList.remove('visible');
@@ -448,37 +640,44 @@
                 const data = await response.json();
 
                 if (response.ok) {
+                    isPdfReady = true;
                     showSuccess(data.message);
                     showContextNotice(data.context);
-                    startBtn.disabled = false;
                 } else {
+                    isPdfReady = false;
                     showError(data.detail || 'Error processing PDF');
                 }
             } catch (error) {
+                isPdfReady = false;
                 showError('Failed to upload PDF: ' + error.message);
             } finally {
                 loading.classList.remove('visible');
+                isBusy = false;
+                updateStartButton();
             }
         }
 
         // Start session
         startBtn.addEventListener('click', async () => {
             loading.classList.add('visible');
+            isBusy = true;
+            updateStartButton();
             const mode = selectedMode();
             loadingText.textContent = mode === 'voice'
                 ? 'Initializing Whisper model and session...'
                 : 'Starting text chat session...';
-            startBtn.disabled = true;
             errorMsg.classList.remove('visible');
 
             try {
                 const phraseTimeout = parseFloat(document.getElementById('phraseTimeout').value);
+                const model = selectedOllamaModel();
 
                 const response = await fetch('/start-session', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         mode: mode,
+                        ollama_model: model,
                         whisper_model: 'base',
                         phrase_timeout: phraseTimeout
                     })
@@ -491,13 +690,14 @@
                     window.location.href = `/conversation?mode=${encodeURIComponent(data.mode || mode)}`;
                 } else {
                     showError(data.detail || 'Error starting session');
-                    startBtn.disabled = false;
+                    checkHealth();
                 }
             } catch (error) {
                 showError('Failed to start session: ' + error.message);
-                startBtn.disabled = false;
             } finally {
                 loading.classList.remove('visible');
+                isBusy = false;
+                updateStartButton();
             }
         });
 

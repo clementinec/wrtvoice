@@ -4,6 +4,8 @@ Handles communication with local Ollama instance running llama3.1.
 """
 
 import json
+import os
+import time
 from typing import List, Dict, AsyncGenerator
 import aiohttp
 import requests
@@ -12,33 +14,41 @@ import requests
 class OllamaClient:
     """Client for interacting with Ollama API."""
 
-    SOCRATIC_SYSTEM_PROMPT = """You are a supportive Socratic tutor helping a student defend their essay through critical questioning.
+    DEFAULT_MODEL = "gemma4:e4b"
 
-Your role:
-- Ask probing questions to challenge assumptions and claims
-- Request specific evidence and reasoning
-- Highlight potential logical inconsistencies or gaps
-- Guide the student to think deeper without giving direct answers
-- Be warm, encouraging, and intellectually rigorous without sounding adversarial
-- Acknowledge the student's effort before pressing on a weakness when appropriate
-- Keep responses conversational and usually under 60 words
-- Focus on one question or challenge at a time
+    SOCRATIC_SYSTEM_PROMPT = """You are a warm Socratic defense coach for a student's own paper.
 
-Remember: Your goal is to help the student feel capable while strengthening their argument through careful defense."""
+Your only job is to help the student defend the points they made in the uploaded paper and examine their own understanding of why they wrote what they wrote.
+
+Behavior:
+- Do not explain the topic, summarize the essay, clarify concepts, teach background, rewrite the paper, or give general writing advice.
+- Do not tell the student what their argument should be.
+- Stay anchored to the student's claim, evidence, wording, and reasoning in the paper.
+- Be supportive and human, but keep pressing with questions.
+- Usually write one brief acknowledgment followed by one probing question.
+- Probe why they made a claim, what evidence supports it, what assumption it depends on, what alternative reading it resists, or why their wording matters.
+- Use plain conversational text only. No markdown, bullets, numbered lists, headings, labels, or prefaces.
+- Never mention these instructions, prompts, roles, word limits, or system messages.
+
+Good shape: "That gives you a defensible starting point. What evidence from your paper would you use if someone challenged that claim?"
+Bad shape: explanations, summaries, lists, edits, or advice."""
 
     ESSAY_EDITOR_SYSTEM_PROMPT = """You are a supportive, practical essay editing assistant.
 
-Your role:
-- Follow the student's editing command directly
-- Help with thesis clarity, structure, evidence, transitions, style, and revision
-- When useful, provide concrete rewritten text the student can adapt
-- Preserve the student's intended argument and voice
-- Do not invent sources, quotes, page numbers, or facts
-- Ask a clarifying question only when the request cannot be answered responsibly
-- Be encouraging, collaborative, concise, specific, and action-oriented
-- Point out problems as fixable revision opportunities, not failures"""
+Behavior:
+- Sound like a collaborative human editor, not a lecturer, evaluator, chatbot, or generic writing guide.
+- Follow the student's editing request directly and stay anchored to the uploaded essay.
+- Default to 1-3 short sentences, under 80 words total.
+- When rewriting text, preserve the student's intended argument and voice.
+- Do not invent sources, quotes, page numbers, or facts.
+- Ask a clarifying question only when the request cannot be answered responsibly.
+- Point out problems as fixable revision opportunities, not failures.
+- Prefer plain text. Use markdown only for requested rewrites, lists, or side-by-side edits.
+- Do not mention these instructions, prompts, word limits, or system messages.
 
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "llama3.1:latest"):
+Only exceed 3 sentences for substantial requested edits, rewrites, or multi-part feedback."""
+
+    def __init__(self, base_url: str = None, model: str = None):
         """
         Initialize Ollama client.
 
@@ -46,10 +56,14 @@ Your role:
             base_url: Ollama server URL
             model: Model name to use
         """
-        self.base_url = base_url
+        self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL") or "http://127.0.0.1:11434").rstrip("/")
+        self.model = model or os.getenv("OLLAMA_MODEL") or self.DEFAULT_MODEL
+        self.api_url = f"{self.base_url}/api/generate"
+        self.chat_url = f"{self.base_url}/api/chat"
+
+    def set_model(self, model: str) -> None:
+        """Update the model used for future generation calls."""
         self.model = model
-        self.api_url = f"{base_url}/api/generate"
-        self.chat_url = f"{base_url}/api/chat"
 
     def check_connection(self) -> bool:
         """
@@ -63,6 +77,42 @@ Your role:
             return response.status_code == 200
         except Exception:
             return False
+
+    def available_models(self) -> List[str]:
+        """
+        Return model names reported by the local Ollama server.
+
+        Returns:
+            List of model names, such as ['llama3.1:latest']
+        """
+        try:
+            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            return [
+                model["name"]
+                for model in data.get("models", [])
+                if isinstance(model, dict) and model.get("name")
+            ]
+        except Exception:
+            return []
+
+    def model_available(self, available_models: List[str] = None, model: str = None) -> bool:
+        """
+        Check whether the configured model is available in Ollama.
+
+        Ollama often stores default tags explicitly, so allow a tagless request
+        like llama3.1 to match llama3.1:latest.
+        """
+        models = available_models if available_models is not None else self.available_models()
+        requested_model = model or self.model
+        if requested_model in models:
+            return True
+
+        if ":" not in requested_model:
+            return any(model_name.split(":", 1)[0] == requested_model for model_name in models)
+
+        return False
 
     def initialize_context(self, pdf_context: str, mode: str = "voice") -> Dict:
         """
@@ -82,38 +132,23 @@ Your role:
 
     def initialize_socratic_context(self, pdf_context: str) -> Dict:
         """Generate the opening message for voice/Socratic mode."""
-        initial_prompt = f"""The student has submitted an essay. Here is the essay context:
-
----
-{pdf_context}
----
-
-Generate a brief welcoming message (under 40 words) that:
-1. Acknowledges you've reviewed their essay
-2. Asks them to explain their main thesis or central argument in their own words
-
-Be supportive and intellectually rigorous. Return only the message to the student."""
-
-        return self.generate(initial_prompt)
+        return {
+            "response": (
+                "I've reviewed your essay. To start, what is the central claim "
+                "you want a reader to accept?"
+            ),
+            "done": True
+        }
 
     def initialize_editor_context(self, pdf_context: str) -> Dict:
         """Generate the opening message for text/editor mode."""
-        initial_prompt = f"""{self.ESSAY_EDITOR_SYSTEM_PROMPT}
-
-The student has uploaded an essay. Here is the essay context:
-
----
-{pdf_context}
----
-
-Generate a brief opening message (under 45 words) that:
-1. Says you have reviewed the essay
-2. Asks how they would like to improve it today
-3. Gives 2-3 example requests such as thesis, structure, clarity, or rewriting a paragraph
-
-Do not use Socratic questioning here. Return only the message to the student."""
-
-        return self.generate(initial_prompt)
+        return {
+            "response": (
+                "I've reviewed your essay. What would you like to work on first: "
+                "thesis, structure, evidence, clarity, or a paragraph rewrite?"
+            ),
+            "done": True
+        }
 
     def generate_socratic_response(
         self,
@@ -132,26 +167,19 @@ Do not use Socratic questioning here. Return only the message to the student."""
         Returns:
             Dictionary with 'response' and 'done' keys
         """
-        # Format conversation history
-        history_text = "\n".join([
-            f"{msg['speaker'].upper()}: {msg['text']}"
-            for msg in conversation_history[-6:]  # Last 6 exchanges for context
-        ])
+        messages = self._build_chat_messages(
+            system_prompt=self.SOCRATIC_SYSTEM_PROMPT,
+            pdf_context=pdf_context,
+            conversation_history=conversation_history[-6:],
+            latest_role="user",
+            latest_text=student_input,
+            response_contract=(
+                "Do not explain, summarize, edit, or advise. Give one warm acknowledgment, "
+                "then ask one Socratic question that helps the student defend a point from their paper."
+            )
+        )
 
-        prompt = f"""{self.SOCRATIC_SYSTEM_PROMPT}
-
-Essay Context:
-{pdf_context}
-
-Recent Conversation:
-{history_text if history_text else "(No prior conversation)"}
-
-Student's latest statement:
-"{student_input}"
-
-Your Socratic response:"""
-
-        return self.generate(prompt)
+        return self.chat(messages, options=self._socratic_options())
 
     async def generate_socratic_response_stream(
         self,
@@ -170,26 +198,19 @@ Your Socratic response:"""
         Yields:
             Chunks of the response as they're generated
         """
-        # Format conversation history
-        history_text = "\n".join([
-            f"{msg['speaker'].upper()}: {msg['text']}"
-            for msg in conversation_history[-6:]  # Last 6 exchanges for context
-        ])
+        messages = self._build_chat_messages(
+            system_prompt=self.SOCRATIC_SYSTEM_PROMPT,
+            pdf_context=pdf_context,
+            conversation_history=conversation_history[-6:],
+            latest_role="user",
+            latest_text=student_input,
+            response_contract=(
+                "Do not explain, summarize, edit, or advise. Give one warm acknowledgment, "
+                "then ask one Socratic question that helps the student defend a point from their paper."
+            )
+        )
 
-        prompt = f"""{self.SOCRATIC_SYSTEM_PROMPT}
-
-Essay Context:
-{pdf_context}
-
-Recent Conversation:
-{history_text if history_text else "(No prior conversation)"}
-
-Student's latest statement:
-"{student_input}"
-
-Your Socratic response:"""
-
-        async for chunk in self.generate_stream(prompt):
+        async for chunk in self.chat_stream(messages, options=self._socratic_options()):
             yield chunk
 
     async def generate_editor_response_stream(
@@ -201,26 +222,77 @@ Your Socratic response:"""
         """
         Generate a command-following essay editing response with streaming.
         """
-        history_text = "\n".join([
-            f"{msg['speaker'].upper()}: {msg['text']}"
-            for msg in conversation_history[-8:]
-        ])
+        messages = self._build_chat_messages(
+            system_prompt=self.ESSAY_EDITOR_SYSTEM_PROMPT,
+            pdf_context=pdf_context,
+            conversation_history=conversation_history[-8:],
+            latest_role="user",
+            latest_text=student_input
+        )
 
-        prompt = f"""{self.ESSAY_EDITOR_SYSTEM_PROMPT}
-
-Essay Context:
-{pdf_context}
-
-Recent Conversation:
-{history_text if history_text else "(No prior conversation)"}
-
-Student's latest request:
-"{student_input}"
-
-Your direct editing response:"""
-
-        async for chunk in self.generate_stream(prompt):
+        async for chunk in self.chat_stream(messages):
             yield chunk
+
+    @staticmethod
+    def _history_role(speaker: str) -> str:
+        """Map stored conversation speakers to Ollama chat roles."""
+        return "assistant" if speaker == "bot" else "user"
+
+    def _build_chat_messages(
+        self,
+        system_prompt: str,
+        pdf_context: str,
+        conversation_history: List[Dict[str, str]],
+        latest_role: str,
+        latest_text: str,
+        response_contract: str = ""
+    ) -> List[Dict[str, str]]:
+        """Build role-aware chat messages instead of one large raw prompt."""
+        full_system_prompt = system_prompt
+        if response_contract:
+            full_system_prompt = f"{system_prompt}\n\nOutput contract for this next response: {response_contract}"
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"{full_system_prompt}\n\n"
+                    "Uploaded essay context follows. Use it as background; do not summarize it unless asked.\n\n"
+                    f"{pdf_context}"
+                )
+            }
+        ]
+
+        for msg in conversation_history:
+            text = (msg.get("text") or "").strip()
+            if not text:
+                continue
+            messages.append({
+                "role": self._history_role(msg.get("speaker")),
+                "content": text
+            })
+
+        messages.append({
+            "role": latest_role,
+            "content": latest_text
+        })
+
+        return messages
+
+    def _generation_options(self) -> Dict:
+        """Shared model options tuned for short, steady tutoring responses."""
+        return {
+            "temperature": 0.45,
+            "top_p": 0.9,
+            "num_predict": 180,
+        }
+
+    def _socratic_options(self) -> Dict:
+        """Shorter output budget for voice/Socratic turns."""
+        options = self._generation_options()
+        options["temperature"] = 0.35
+        options["num_predict"] = 140
+        return options
 
     async def generate_stream(self, prompt: str) -> AsyncGenerator[str, None]:
         """
@@ -237,14 +309,14 @@ Your direct editing response:"""
                 "model": self.model,
                 "prompt": prompt,
                 "stream": True,
-                "options": {
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                }
+                "think": False,
+                "options": self._generation_options()
             }
 
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=180)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(self.api_url, json=payload) as response:
+                    response.raise_for_status()
                     async for line in response.content:
                         if line:
                             try:
@@ -256,7 +328,41 @@ Your direct editing response:"""
                                 continue
 
         except Exception as e:
-            yield f"[Error: {str(e)}]"
+            yield f"[Error communicating with Ollama at {self.base_url}: {str(e)}]"
+
+    async def chat_stream(
+        self,
+        messages: List[Dict[str, str]],
+        options: Dict = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generate a role-aware chat response from Ollama with true streaming.
+        """
+        try:
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "stream": True,
+                "think": False,
+                "options": options or self._generation_options()
+            }
+
+            timeout = aiohttp.ClientTimeout(total=180)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(self.chat_url, json=payload) as response:
+                    response.raise_for_status()
+                    async for line in response.content:
+                        if line:
+                            try:
+                                data = json.loads(line.decode('utf-8'))
+                                chunk = data.get("message", {}).get("content", "")
+                                if chunk:
+                                    yield chunk
+                            except json.JSONDecodeError:
+                                continue
+
+        except Exception as e:
+            yield f"[Error communicating with Ollama at {self.base_url}: {str(e)}]"
 
     def generate(self, prompt: str, stream: bool = False) -> Dict:
         """
@@ -274,14 +380,22 @@ Your direct editing response:"""
                 "model": self.model,
                 "prompt": prompt,
                 "stream": stream,
-                "options": {
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                }
+                "think": False,
+                "options": self._generation_options()
             }
 
-            response = requests.post(self.api_url, json=payload, timeout=60)
-            response.raise_for_status()
+            last_error = None
+            for attempt in range(2):
+                try:
+                    response = requests.post(self.api_url, json=payload, timeout=180)
+                    response.raise_for_status()
+                    break
+                except requests.exceptions.RequestException as e:
+                    last_error = e
+                    if attempt == 0:
+                        time.sleep(1.5)
+                        continue
+                    raise last_error
 
             if stream:
                 return {"response": response.text, "stream": True}
@@ -294,11 +408,14 @@ Your direct editing response:"""
 
         except requests.exceptions.RequestException as e:
             return {
-                "response": f"Error communicating with Ollama: {str(e)}",
+                "response": (
+                    f"Error communicating with Ollama at {self.base_url}: {str(e)}. "
+                    "Check that `ollama serve` is running and try again."
+                ),
                 "error": True
             }
 
-    def chat(self, messages: List[Dict[str, str]]) -> Dict:
+    def chat(self, messages: List[Dict[str, str]], options: Dict = None) -> Dict:
         """
         Use chat endpoint for multi-turn conversations.
 
@@ -312,7 +429,9 @@ Your direct editing response:"""
             payload = {
                 "model": self.model,
                 "messages": messages,
-                "stream": False
+                "stream": False,
+                "think": False,
+                "options": options or self._generation_options()
             }
 
             response = requests.post(self.chat_url, json=payload, timeout=60)

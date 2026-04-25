@@ -21,6 +21,12 @@ Text mode:
 pip install -r requirements_web.txt
 ```
 
+Or use the installer, which now defaults to text mode and skips PyAudio:
+
+```bash
+./install_dependencies.sh
+```
+
 For scanned PDFs or PDFs printed from a browser viewer, install OCR support:
 
 ```bash
@@ -30,20 +36,29 @@ brew install tesseract
 Voice mode also requires the audio/Whisper stack:
 
 ```bash
-pip install -r requirements.txt
+./install_dependencies.sh --voice
 ```
 
-For macOS voice mode, install system audio tools first:
+For macOS voice mode, PyAudio needs the Homebrew PortAudio headers:
 
 ```bash
-brew install portaudio ffmpeg
+env -u HOMEBREW_BOTTLE_DOMAIN -u HOMEBREW_API_DOMAIN HOMEBREW_NO_AUTO_UPDATE=1 brew install portaudio
 ```
 
-The app expects Ollama to be running locally with `llama3.1:latest`:
+The app expects Ollama to be running locally. The preferred default model is
+`gemma4:e4b`, and you can switch to any installed model on the upload page:
 
 ```bash
 ollama serve
-ollama pull llama3.1
+ollama pull gemma4:e4b
+ollama pull qwen3:14b
+```
+
+To use a different installed model or Ollama host, set:
+
+```bash
+export OLLAMA_MODEL=gemma4:e4b
+export OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
 ## Run
@@ -84,6 +99,7 @@ the backend.
 - `POST /start-session` - start a text or voice session.
 - `GET /session-state` - current in-memory session state for the UI.
 - `POST /message` - submit a typed student message.
+- `POST /message/stream` - submit a typed message and stream NDJSON response chunks.
 - `WebSocket /ws/conversation` - voice-mode transcription/response stream.
 - `POST /end-session` - save and close the current session.
 - `GET /sessions` - list saved sessions.
@@ -107,7 +123,7 @@ conversations/              Saved session exports
 
 - `requirements_web.txt` is enough for text mode.
 - OCR fallback requires `tesseract` on the system path.
-- `requirements_all.txt` installs everything, including optional voice/TTS code.
+- `requirements_all.txt` installs everything, including optional voice code.
 - The current app keeps one active in-memory session at a time.
 - Generated caches and temporary uploads are ignored by `.gitignore`; existing
   checked-in conversation fixtures are left untouched.

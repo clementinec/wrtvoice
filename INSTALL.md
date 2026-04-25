@@ -2,9 +2,20 @@
 
 ## Quick Install (Automated)
 
+Text mode only, recommended for first testing:
+
 ```bash
 ./install_dependencies.sh
 ```
+
+Voice mode, including Whisper and PyAudio:
+
+```bash
+./install_dependencies.sh --voice
+```
+
+If PyAudio fails, text mode can still run. Use `pip install -r requirements_web.txt`
+or rerun `./install_dependencies.sh` without `--voice`.
 
 ## Manual Install (Step-by-Step)
 
@@ -17,10 +28,7 @@ If the automated script fails, follow these steps:
 # /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 # Install portaudio (required for PyAudio)
-brew install portaudio
-
-# Install ffmpeg (required for audio processing)
-brew install ffmpeg
+env -u HOMEBREW_BOTTLE_DOMAIN -u HOMEBREW_API_DOMAIN HOMEBREW_NO_AUTO_UPDATE=1 brew install portaudio
 ```
 
 ### 2. Upgrade pip
@@ -45,20 +53,19 @@ pip3 install requests
 pip3 install pyaudio
 
 # If PyAudio fails, try:
-CFLAGS="-I/opt/homebrew/include" LDFLAGS="-L/opt/homebrew/lib" pip3 install pyaudio
+ARCHFLAGS="-arch arm64" CFLAGS="-I/opt/homebrew/opt/portaudio/include" LDFLAGS="-L/opt/homebrew/opt/portaudio/lib" pip3 install pyaudio
 
 # Or for Intel Macs:
 CFLAGS="-I/usr/local/include" LDFLAGS="-L/usr/local/lib" pip3 install pyaudio
 
 # Other audio libraries
 pip3 install SpeechRecognition
-pip3 install pyttsx3
 ```
 
 ### 5. Install Whisper
 
 ```bash
-pip3 install git+https://github.com/openai/whisper.git
+pip3 install openai-whisper
 ```
 
 ### 6. Install Web Framework
@@ -76,7 +83,7 @@ pip3 install python-dotenv
 
 ```bash
 python3 << 'EOF'
-packages = ['fastapi', 'uvicorn', 'websockets', 'PyPDF2', 'pyttsx3',
+packages = ['fastapi', 'uvicorn', 'websockets', 'PyPDF2',
             'requests', 'torch', 'numpy', 'whisper', 'speech_recognition', 'pyaudio']
 for pkg in packages:
     try:
@@ -99,8 +106,8 @@ python3 -m venv venv
 source venv/bin/activate
 
 # Install all dependencies
-pip install -r requirements.txt
 pip install -r requirements_web.txt
+pip install -r requirements.txt
 
 # When done, deactivate with:
 deactivate
@@ -115,8 +122,9 @@ deactivate
 **Solution**:
 ```bash
 brew install portaudio
-export CFLAGS="-I/opt/homebrew/include"
-export LDFLAGS="-L/opt/homebrew/lib"
+export ARCHFLAGS="-arch arm64"
+export CFLAGS="-I/opt/homebrew/opt/portaudio/include"
+export LDFLAGS="-L/opt/homebrew/opt/portaudio/lib"
 pip3 install pyaudio
 ```
 
@@ -126,13 +134,6 @@ pip3 install pyaudio
 
 **Solution**: This is normal! The app detects this automatically and uses CPU.
 No action needed.
-
-### pyttsx3 says "No module named 'pyobjc'"
-
-**Solution**:
-```bash
-pip3 install pyobjc
-```
 
 ### "command not found: ollama"
 

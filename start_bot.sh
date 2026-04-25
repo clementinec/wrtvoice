@@ -5,6 +5,11 @@ echo "  Socratic Method Bot - Startup Script"
 echo "=========================================="
 echo ""
 
+export OLLAMA_MODEL="${OLLAMA_MODEL:-gemma4:e4b}"
+export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+export HOST="${HOST:-127.0.0.1}"
+export PORT="${PORT:-8000}"
+
 # Activate virtual environment if it exists
 if [ -d "venv" ]; then
     echo "Activating virtual environment..."
@@ -15,10 +20,11 @@ fi
 
 # Check if Ollama is running
 echo "Checking Ollama status..."
-if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+if curl -s "${OLLAMA_BASE_URL}/api/tags" > /dev/null 2>&1; then
     echo "✓ Ollama is running"
 else
     echo "✗ Ollama is not running!"
+    echo "  Checked: ${OLLAMA_BASE_URL}"
     echo ""
     echo "Please start Ollama in another terminal:"
     echo "  ollama serve"
@@ -26,17 +32,33 @@ else
     read -p "Press Enter after starting Ollama, or Ctrl+C to exit..."
 fi
 
-# Check if llama3.1 is available
+# Check if the configured Ollama model is available
 echo ""
-echo "Checking for llama3.1 model..."
-if ollama list | grep -q "llama3.1"; then
-    echo "✓ llama3.1 model found"
+echo "Checking for ${OLLAMA_MODEL} model..."
+model_found=0
+while read -r model_name _; do
+    if [ "${model_name}" = "${OLLAMA_MODEL}" ]; then
+        model_found=1
+        break
+    fi
+
+    if [[ "${OLLAMA_MODEL}" != *:* && "${model_name}" == "${OLLAMA_MODEL}:"* ]]; then
+        model_found=1
+        break
+    fi
+done < <(ollama list | tail -n +2)
+
+if [ "${model_found}" -eq 1 ]; then
+    echo "✓ ${OLLAMA_MODEL} model found"
 else
-    echo "✗ llama3.1 model not found!"
+    echo "⚠ ${OLLAMA_MODEL} model not found."
     echo ""
-    echo "Please install it:"
-    echo "  ollama pull llama3.1"
-    exit 1
+    echo "You can still start the app and choose any installed model in the browser."
+    echo "To install the preferred default:"
+    echo "  ollama pull ${OLLAMA_MODEL}"
+    echo ""
+    echo "Or start with a different preferred model:"
+    echo "  OLLAMA_MODEL=<model-name> ./start_bot.sh"
 fi
 
 # Check Python dependencies
@@ -68,7 +90,7 @@ echo "  Starting FastAPI Server..."
 echo "=========================================="
 echo ""
 echo "Access the application at:"
-echo "  http://localhost:8000"
+echo "  http://${HOST}:${PORT}"
 echo ""
 echo "Press Ctrl+C to stop the server"
 echo ""

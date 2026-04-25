@@ -1,3 +1,6 @@
+# Full install including optional voice dependencies.
+# For text-mode testing, prefer: pip install -r requirements_web.txt
+
 # Core dependencies
 setuptools
 wheel
@@ -12,10 +15,9 @@ torchaudio
 # Audio processing
 pyaudio
 SpeechRecognition
-pyttsx3
 
 # Whisper (OpenAI)
-git+https://github.com/openai/whisper.git
+openai-whisper
 
 # Web framework
 fastapi
