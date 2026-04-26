@@ -28,6 +28,7 @@ aiohttp
 
 # PDF processing
 PyPDF2
+PyMuPDF
 
 # Utilities
 python-dotenv

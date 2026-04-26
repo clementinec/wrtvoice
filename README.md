@@ -46,20 +46,36 @@ env -u HOMEBREW_BOTTLE_DOMAIN -u HOMEBREW_API_DOMAIN HOMEBREW_NO_AUTO_UPDATE=1 b
 ```
 
 The app expects Ollama to be running locally. The preferred default model is
-`gemma4:e4b`, and you can switch to any installed model on the upload page:
+`qwen3:14b`, and you can switch to any installed model on the upload page:
 
 ```bash
 ollama serve
-ollama pull gemma4:e4b
 ollama pull qwen3:14b
+ollama pull llama3.1
+ollama pull gemma4:e4b
 ```
 
 To use a different installed model or Ollama host, set:
 
 ```bash
-export OLLAMA_MODEL=gemma4:e4b
+export OLLAMA_MODEL=qwen3:14b
 export OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
+
+Voice mode defaults to Whisper `small.en` for better transcription. The first
+startup preloads it and may download the model once. To choose a faster model or
+skip preload:
+
+```bash
+export WHISPER_MODEL=base
+export PRELOAD_WHISPER_MODEL=0
+```
+
+For voice/Socratic sessions, the model prompt uses a compact paper anchor
+(detected Abstract when available, otherwise a synthesized abstract-like anchor
+when Ollama is available, otherwise the opening words) plus recent conversation
+memory. Text editing mode still uses the fuller imported essay excerpt for
+revision tasks.
 
 ## Run
 

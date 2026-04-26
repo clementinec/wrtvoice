@@ -1,10 +1,11 @@
 """
 Ollama Client Module
-Handles communication with local Ollama instance running llama3.1.
+Handles communication with a local Ollama instance.
 """
 
 import json
 import os
+import re
 import time
 from typing import List, Dict, AsyncGenerator
 import aiohttp
@@ -14,7 +15,7 @@ import requests
 class OllamaClient:
     """Client for interacting with Ollama API."""
 
-    DEFAULT_MODEL = "gemma4:e4b"
+    DEFAULT_MODEL = "qwen3:14b"
 
     SOCRATIC_SYSTEM_PROMPT = """You are a warm Socratic defense coach for a student's own paper.
 
@@ -24,10 +25,13 @@ Behavior:
 - Do not explain the topic, summarize the essay, clarify concepts, teach background, rewrite the paper, or give general writing advice.
 - Do not tell the student what their argument should be.
 - Stay anchored to the student's claim, evidence, wording, and reasoning in the paper.
-- Be supportive and human, but keep pressing with questions.
-- Usually write one brief acknowledgment followed by one probing question.
+- Be supportive and human, but do not praise, grade, evaluate, or congratulate the student.
+- Write 1-3 short conversational sentences.
+- Every response must end with exactly one open Socratic question.
+- Ask one question only; do not answer it yourself.
 - Probe why they made a claim, what evidence supports it, what assumption it depends on, what alternative reading it resists, or why their wording matters.
 - Use plain conversational text only. No markdown, bullets, numbered lists, headings, labels, or prefaces.
+- If the student says continue, go on, or keep going, continue the previous line of inquiry instead of asking for the context again.
 - Never mention these instructions, prompts, roles, word limits, or system messages.
 
 Good shape: "That gives you a defensible starting point. What evidence from your paper would you use if someone challenged that claim?"
@@ -38,12 +42,13 @@ Bad shape: explanations, summaries, lists, edits, or advice."""
 Behavior:
 - Sound like a collaborative human editor, not a lecturer, evaluator, chatbot, or generic writing guide.
 - Follow the student's editing request directly and stay anchored to the uploaded essay.
-- Default to 1-3 short sentences, under 80 words total.
+- Default to 1-3 short sentences: a brief direct response, one useful next move, and only then an optional offer to go deeper.
 - When rewriting text, preserve the student's intended argument and voice.
 - Do not invent sources, quotes, page numbers, or facts.
 - Ask a clarifying question only when the request cannot be answered responsibly.
 - Point out problems as fixable revision opportunities, not failures.
 - Prefer plain text. Use markdown only for requested rewrites, lists, or side-by-side edits.
+- If the student says continue, continue from your previous answer instead of asking them to restate the context.
 - Do not mention these instructions, prompts, word limits, or system messages.
 
 Only exceed 3 sentences for substantial requested edits, rewrites, or multi-part feedback."""
@@ -170,13 +175,10 @@ Only exceed 3 sentences for substantial requested edits, rewrites, or multi-part
         messages = self._build_chat_messages(
             system_prompt=self.SOCRATIC_SYSTEM_PROMPT,
             pdf_context=pdf_context,
-            conversation_history=conversation_history[-6:],
+            conversation_history=conversation_history[-self._socratic_history_limit():],
             latest_role="user",
             latest_text=student_input,
-            response_contract=(
-                "Do not explain, summarize, edit, or advise. Give one warm acknowledgment, "
-                "then ask one Socratic question that helps the student defend a point from their paper."
-            )
+            response_contract=self._socratic_response_contract(student_input, conversation_history)
         )
 
         return self.chat(messages, options=self._socratic_options())
@@ -201,13 +203,10 @@ Only exceed 3 sentences for substantial requested edits, rewrites, or multi-part
         messages = self._build_chat_messages(
             system_prompt=self.SOCRATIC_SYSTEM_PROMPT,
             pdf_context=pdf_context,
-            conversation_history=conversation_history[-6:],
+            conversation_history=conversation_history[-self._socratic_history_limit():],
             latest_role="user",
             latest_text=student_input,
-            response_contract=(
-                "Do not explain, summarize, edit, or advise. Give one warm acknowledgment, "
-                "then ask one Socratic question that helps the student defend a point from their paper."
-            )
+            response_contract=self._socratic_response_contract(student_input, conversation_history)
         )
 
         async for chunk in self.chat_stream(messages, options=self._socratic_options()):
@@ -227,7 +226,8 @@ Only exceed 3 sentences for substantial requested edits, rewrites, or multi-part
             pdf_context=pdf_context,
             conversation_history=conversation_history[-8:],
             latest_role="user",
-            latest_text=student_input
+            latest_text=student_input,
+            response_contract=self._editor_response_contract(student_input, conversation_history)
         )
 
         async for chunk in self.chat_stream(messages):
@@ -279,19 +279,139 @@ Only exceed 3 sentences for substantial requested edits, rewrites, or multi-part
 
         return messages
 
+    def _model_family(self) -> str:
+        """Return a coarse model family for prompt and option tuning."""
+        model_name = (self.model or "").lower()
+        if model_name.startswith("qwen"):
+            return "qwen"
+        if model_name.startswith("llama"):
+            return "llama"
+        if model_name.startswith("gemma"):
+            return "gemma"
+        return "generic"
+
+    def _socratic_history_limit(self) -> int:
+        """Use more recent turns for models that can use them without drifting."""
+        if self._model_family() == "qwen":
+            return 10
+        return 8
+
+    @staticmethod
+    def _is_continuation_request(text: str) -> bool:
+        normalized = re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+        return normalized in {
+            "continue",
+            "go on",
+            "keep going",
+            "please continue",
+            "continue please",
+            "say more",
+            "tell me more",
+            "more",
+            "and then",
+            "what next",
+        }
+
+    @staticmethod
+    def _last_assistant_tail(conversation_history: List[Dict[str, str]], max_words: int = 420) -> str:
+        """Return the tail of the previous assistant turn for continuation prompts."""
+        for msg in reversed(conversation_history):
+            if msg.get("speaker") != "bot":
+                continue
+            words = (msg.get("text") or "").split()
+            return " ".join(words[-max_words:])
+        return ""
+
+    def _continuation_contract(self, student_input: str, conversation_history: List[Dict[str, str]]) -> str:
+        if not self._is_continuation_request(student_input):
+            return ""
+
+        previous_tail = self._last_assistant_tail(conversation_history)
+        if not previous_tail:
+            return "The student asked you to continue. Continue the current conversation thread; do not ask them to restate context."
+
+        return (
+            "The student asked you to continue. Continue from your immediately previous answer, "
+            "using this tail as the anchor. Do not ask them to restate context.\n"
+            f"Previous assistant tail: {previous_tail}"
+        )
+
+    def _socratic_response_contract(
+        self,
+        student_input: str,
+        conversation_history: List[Dict[str, str]]
+    ) -> str:
+        """Build a stricter model-aware contract for the next Socratic turn."""
+        contract_parts = [
+            "Do not explain, summarize, edit, advise, praise, grade, or evaluate.",
+            "Use 1-3 short conversational sentences.",
+            "End with exactly one open Socratic question that helps the student defend a point from their paper.",
+            "Do not ask multiple questions.",
+            "Do not use markdown.",
+        ]
+
+        continuation_contract = self._continuation_contract(student_input, conversation_history)
+        if continuation_contract:
+            contract_parts.append(continuation_contract)
+            contract_parts.append("Continue the same line of inquiry and ask the next deeper follow-up question.")
+
+        family = self._model_family()
+        if family == "qwen":
+            contract_parts.append(
+                "Qwen-specific: you may use one compact setup sentence before the question, "
+                "but the question is mandatory and should carry the depth."
+            )
+        elif family == "gemma":
+            contract_parts.append(
+                "Gemma-specific: skip template praise such as excellent, comprehensive, accurate, "
+                "strong, sound, or thoughtful."
+            )
+        elif family == "llama":
+            contract_parts.append(
+                "Llama-specific: stay concrete by pointing to the student's claim, evidence, or wording before asking the question."
+            )
+
+        return " ".join(contract_parts)
+
+    def _editor_response_contract(
+        self,
+        student_input: str,
+        conversation_history: List[Dict[str, str]]
+    ) -> str:
+        """Build a concise editor contract, with explicit continuation support."""
+        contract_parts = [
+            "Give a brief direct response first.",
+            "If the answer would be long, give the most useful next step and ask whether to expand.",
+            "Do not let the response end mid-sentence.",
+        ]
+
+        continuation_contract = self._continuation_contract(student_input, conversation_history)
+        if continuation_contract:
+            contract_parts.append(continuation_contract)
+            contract_parts.append("Continue the previous answer directly before adding any new framing.")
+
+        return " ".join(contract_parts)
+
     def _generation_options(self) -> Dict:
         """Shared model options tuned for short, steady tutoring responses."""
         return {
             "temperature": 0.45,
             "top_p": 0.9,
-            "num_predict": 180,
+            "num_predict": 360,
+            "repeat_penalty": 1.08,
         }
 
     def _socratic_options(self) -> Dict:
-        """Shorter output budget for voice/Socratic turns."""
+        """Model-aware output budget for voice/Socratic turns."""
         options = self._generation_options()
-        options["temperature"] = 0.35
-        options["num_predict"] = 140
+        family = self._model_family()
+        options["temperature"] = 0.3
+        if family == "qwen":
+            options["num_predict"] = 260
+        elif family == "llama":
+            options["num_predict"] = 220
+        else:
+            options["num_predict"] = 240
         return options
 
     async def generate_stream(self, prompt: str) -> AsyncGenerator[str, None]:

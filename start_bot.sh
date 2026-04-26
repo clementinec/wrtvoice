@@ -5,8 +5,10 @@ echo "  Socratic Method Bot - Startup Script"
 echo "=========================================="
 echo ""
 
-export OLLAMA_MODEL="${OLLAMA_MODEL:-gemma4:e4b}"
+export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3:14b}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+export WHISPER_MODEL="${WHISPER_MODEL:-small}"
+export PRELOAD_WHISPER_MODEL="${PRELOAD_WHISPER_MODEL:-1}"
 export HOST="${HOST:-127.0.0.1}"
 export PORT="${PORT:-8000}"
 
@@ -64,7 +66,7 @@ fi
 # Check Python dependencies
 echo ""
 echo "Checking Python dependencies..."
-if python3 -c "import fastapi, uvicorn, aiohttp, requests, PyPDF2; import multipart" 2>/dev/null; then
+if python3 -c "import fastapi, uvicorn, aiohttp, requests, PyPDF2, fitz; import multipart" 2>/dev/null; then
     echo "✓ Web/text dependencies installed"
 else
     echo "✗ Missing dependencies!"
@@ -76,6 +78,16 @@ fi
 
 if python3 -c "import whisper, speech_recognition, pyaudio, torch, numpy" 2>/dev/null; then
     echo "✓ Voice dependencies installed"
+    if [ "${PRELOAD_WHISPER_MODEL}" = "1" ]; then
+        echo "Preloading Whisper model (${WHISPER_MODEL})..."
+        if python3 -c "import os, whisper; model=os.getenv('WHISPER_MODEL', 'small'); non_english=os.getenv('WHISPER_NON_ENGLISH', '0') == '1'; model_name = model if model == 'large' or non_english else model + '.en'; print(f'Loading Whisper model: {model_name}'); whisper.load_model(model_name); print('✓ Whisper model ready')"; then
+            echo "✓ Whisper preload complete"
+        else
+            echo "⚠ Whisper preload failed; voice mode will try again when a voice session starts."
+        fi
+    else
+        echo "Whisper preload skipped (PRELOAD_WHISPER_MODEL=0)."
+    fi
 else
     echo "Voice dependencies not found; text mode will still work."
     echo "Install requirements.txt or requirements_all.txt to enable voice mode."

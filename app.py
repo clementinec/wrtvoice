@@ -3,7 +3,7 @@ Socratic Method Bot - Main Application
 FastAPI server for real-time transcription and Socratic dialogue.
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -11,6 +11,7 @@ import uvicorn
 import asyncio
 import json
 import os
+import re
 import shutil
 import time
 from datetime import datetime, timezone
@@ -22,14 +23,18 @@ from modules.conversation_manager import ConversationManager
 
 
 PDF_CONTEXT_WORD_LIMIT = 5000
-SOCRATIC_CONTEXT_WORD_LIMIT = 800
+PAPER_ANCHOR_WORD_LIMIT = 320
+MIN_ABSTRACT_WORDS = 20
+SOCRATIC_MEMORY_WORD_LIMIT = 160
+DEFAULT_WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
+SUPPORTED_WHISPER_MODELS = {"tiny", "base", "small", "medium", "large"}
 
 
 # Request models
 class SessionStartRequest(BaseModel):
     mode: str = "voice"
     ollama_model: Optional[str] = None
-    whisper_model: str = "base"
+    whisper_model: str = DEFAULT_WHISPER_MODEL
     phrase_timeout: float = 5.0  # Default 5 seconds
 
 
@@ -50,6 +55,9 @@ ollama_client = OllamaClient()
 current_session = {
     "pdf_uploaded": False,
     "pdf_context": "",
+    "paper_anchor": "",
+    "paper_anchor_source": "",
+    "socratic_memory": "",
     "pdf_metadata": {},
     "pdf_context_stats": {},
     "session_active": False,
@@ -60,11 +68,12 @@ current_session = {
 
 SESSION_MODES = {"voice", "text"}
 RECOMMENDED_OLLAMA_MODELS = [
-    "gemma4:e4b",
     "qwen3:14b",
-    "gemma3:12b",
     "llama3.1:latest",
+    "gemma4:e4b",
+    "gemma3:12b",
 ]
+FILLER_WORDS = {"um", "umm", "uh", "uhh", "er", "erm", "em", "emm", "hm", "hmm", "mm", "mmm", "mhm"}
 
 
 def normalize_session_mode(mode: str) -> str:
@@ -80,6 +89,17 @@ def normalize_ollama_model(model: Optional[str]) -> str:
     normalized = (model or ollama_client.model or OllamaClient.DEFAULT_MODEL).strip()
     if not normalized:
         raise HTTPException(status_code=400, detail="Ollama model is required")
+    return normalized
+
+
+def normalize_whisper_model(model: Optional[str]) -> str:
+    """Normalize and validate the requested local Whisper model size."""
+    normalized = (model or DEFAULT_WHISPER_MODEL).strip().lower()
+    if normalized not in SUPPORTED_WHISPER_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Whisper model must be one of: {', '.join(sorted(SUPPORTED_WHISPER_MODELS))}"
+        )
     return normalized
 
 
@@ -112,6 +132,9 @@ def reset_runtime_session() -> None:
     current_session.update({
         "pdf_uploaded": False,
         "pdf_context": "",
+        "paper_anchor": "",
+        "paper_anchor_source": "",
+        "socratic_memory": "",
         "pdf_metadata": {},
         "pdf_context_stats": {},
         "session_active": False,
@@ -125,6 +148,201 @@ def reset_runtime_session() -> None:
 def public_context_stats(context_stats: dict) -> dict:
     """Return context metadata without echoing essay text to the browser."""
     return {key: value for key, value in context_stats.items() if key != "text"}
+
+
+def trim_words(text: str, max_words: int) -> str:
+    """Trim text to a word budget without splitting on punctuation."""
+    words = (text or "").split()
+    return " ".join(words[:max_words])
+
+
+def extract_paper_anchor(pdf_context: str) -> dict:
+    """
+    Extract a stable short paper anchor for voice mode.
+
+    Prefer an Abstract section when it is detectable; otherwise use the opening
+    words. This keeps every Socratic turn grounded without resending the whole
+    essay excerpt.
+    """
+    normalized = re.sub(r"\s+", " ", pdf_context or "").strip()
+    if not normalized:
+        return {"text": "", "source": "none", "words": 0}
+
+    abstract_match = re.search(
+        r"\babstract\b\s*[:.\-]?\s*(?P<body>.*?)(?=\b(?:keywords?|key words|introduction|1\.?\s+introduction|i\.?\s+introduction|background)\b)",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if abstract_match:
+        abstract_text = trim_words(abstract_match.group("body").strip(), PAPER_ANCHOR_WORD_LIMIT)
+        if len(abstract_text.split()) >= MIN_ABSTRACT_WORDS:
+            return {
+                "text": abstract_text,
+                "source": "abstract",
+                "words": len(abstract_text.split())
+            }
+
+    abstract_start = re.search(r"\babstract\b\s*[:.\-]?\s*(?P<body>.*)", normalized, flags=re.IGNORECASE)
+    if abstract_start:
+        abstract_text = trim_words(abstract_start.group("body").strip(), PAPER_ANCHOR_WORD_LIMIT)
+        if len(abstract_text.split()) >= MIN_ABSTRACT_WORDS:
+            return {
+                "text": abstract_text,
+                "source": "abstract",
+                "words": len(abstract_text.split())
+            }
+
+    opening_text = trim_words(normalized, PAPER_ANCHOR_WORD_LIMIT)
+    return {
+        "text": opening_text,
+        "source": "opening",
+        "words": len(opening_text.split())
+    }
+
+
+def synthesize_paper_anchor(pdf_context: str, model: Optional[str] = None) -> dict:
+    """
+    Generate a compact abstract-like anchor when the PDF has no detected Abstract.
+
+    This is best-effort. If Ollama is unavailable or generation fails, callers
+    should fall back to the opening words rather than fail the upload.
+    """
+    model_name = normalize_ollama_model(model)
+    if not ollama_client.check_connection():
+        return {
+            "text": "",
+            "source": "synthesis_failed",
+            "words": 0,
+            "error": f"Ollama is not available at {ollama_client.base_url}"
+        }
+
+    if not ollama_client.model_available(model=model_name):
+        return {
+            "text": "",
+            "source": "synthesis_failed",
+            "words": 0,
+            "error": f"Ollama model '{model_name}' is not installed"
+        }
+
+    previous_model = ollama_client.model
+    excerpt = trim_words(pdf_context, PDF_CONTEXT_WORD_LIMIT)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Create a compact paper anchor for a Socratic tutor. "
+                "Use only the provided paper text. Do not invent sources, claims, authors, data, or conclusions. "
+                "Write 120-220 words in plain prose, no heading, no bullets, no markdown. "
+                "Capture the central claim, scope, evidence base, and stakes if present."
+            )
+        },
+        {
+            "role": "user",
+            "content": f"Paper text excerpt:\n\n{excerpt}"
+        }
+    ]
+
+    try:
+        ollama_client.set_model(model_name)
+        result = ollama_client.chat(
+            messages,
+            options={
+                "temperature": 0.2,
+                "top_p": 0.85,
+                "num_predict": 280,
+                "repeat_penalty": 1.08,
+            }
+        )
+    finally:
+        ollama_client.set_model(previous_model)
+
+    if result.get("error"):
+        return {
+            "text": "",
+            "source": "synthesis_failed",
+            "words": 0,
+            "error": result.get("response", "Ollama synthesis failed")
+        }
+
+    synthesized = re.sub(
+        r"^\s*(?:abstract|summary|paper anchor)\s*[:.\-]\s*",
+        "",
+        result.get("response", "").strip(),
+        flags=re.IGNORECASE,
+    )
+    synthesized = trim_words(synthesized, PAPER_ANCHOR_WORD_LIMIT)
+    if len(synthesized.split()) < MIN_ABSTRACT_WORDS:
+        return {
+            "text": "",
+            "source": "synthesis_failed",
+            "words": len(synthesized.split()),
+            "error": "Synthesized anchor was too short"
+        }
+
+    return {
+        "text": synthesized,
+        "source": "synthetic_abstract",
+        "words": len(synthesized.split())
+    }
+
+
+def choose_paper_anchor(pdf_context: str, model: Optional[str] = None) -> dict:
+    """Detect an abstract, synthesize one if needed, then fall back to opening words."""
+    detected_anchor = extract_paper_anchor(pdf_context)
+    if detected_anchor["source"] == "abstract":
+        detected_anchor["synthesis_attempted"] = False
+        return detected_anchor
+
+    synthesized_anchor = synthesize_paper_anchor(pdf_context, model=model)
+    if synthesized_anchor.get("text"):
+        synthesized_anchor["synthesis_attempted"] = True
+        synthesized_anchor["fallback_anchor_source"] = detected_anchor["source"]
+        return synthesized_anchor
+
+    detected_anchor["synthesis_attempted"] = True
+    detected_anchor["synthesis_error"] = synthesized_anchor.get("error", "Synthesis unavailable")
+    return detected_anchor
+
+
+def store_processed_pdf(
+    filename: str,
+    temp_path: str,
+    context_stats: dict,
+    context_summary: dict,
+    paper_anchor: dict
+) -> dict:
+    """Persist processed PDF state and build the upload response."""
+    pdf_metadata = PDFParser().get_metadata(temp_path)
+
+    context_summary["paper_anchor_source"] = paper_anchor["source"]
+    context_summary["paper_anchor_words"] = paper_anchor["words"]
+    context_summary["paper_anchor_synthesis_attempted"] = paper_anchor.get("synthesis_attempted", False)
+    if paper_anchor.get("synthesis_error"):
+        context_summary["paper_anchor_synthesis_error"] = paper_anchor["synthesis_error"]
+
+    current_session["pdf_uploaded"] = True
+    current_session["pdf_context"] = context_stats["text"]
+    current_session["paper_anchor"] = paper_anchor["text"]
+    current_session["paper_anchor_source"] = paper_anchor["source"]
+    current_session["socratic_memory"] = ""
+    current_session["pdf_metadata"] = pdf_metadata
+    current_session["session_active"] = False
+    current_session["pdf_metadata"]["filename"] = filename
+    current_session["pdf_metadata"]["words_extracted"] = context_summary["words_extracted"]
+    current_session["pdf_metadata"]["total_words"] = context_summary["total_words"]
+    current_session["pdf_metadata"]["word_limit"] = context_summary["word_limit"]
+    current_session["pdf_metadata"]["truncated"] = context_summary["truncated"]
+    current_session["pdf_metadata"]["paper_anchor_source"] = paper_anchor["source"]
+    current_session["pdf_metadata"]["paper_anchor_words"] = paper_anchor["words"]
+    current_session["pdf_metadata"]["paper_anchor_synthesis_attempted"] = paper_anchor.get("synthesis_attempted", False)
+    current_session["pdf_context_stats"] = context_summary
+
+    return {
+        "success": True,
+        "message": f"PDF processed: {context_summary['words_extracted']} words imported",
+        "metadata": pdf_metadata,
+        "context": context_summary
+    }
 
 
 def pdf_extraction_error(context_summary: dict) -> str:
@@ -183,11 +401,111 @@ def prompt_history_without_latest_student(student_text: str) -> list:
     return history
 
 
+def is_filler_utterance(text: str) -> bool:
+    """Return true for speech fragments that should not trigger the model."""
+    words = re.sub(r"[^a-zA-Z]+", " ", text or "").lower().split()
+    return bool(words) and len(words) <= 4 and all(word in FILLER_WORDS for word in words)
+
+
+def ensure_socratic_question(response_text: str) -> str:
+    """Make voice/Socratic responses recover if a model stops without asking."""
+    text = (response_text or "").strip()
+    if not text or text.startswith("[Error communicating with Ollama"):
+        return text
+
+    if text.rstrip(' "\'').endswith(("?", "？")):
+        return text
+
+    return (
+        f"{text} "
+        "What evidence from your paper would you use to defend that point?"
+    )
+
+
+def extract_questions(text: str) -> list:
+    """Extract questions from a bot response for repetition avoidance."""
+    return [question.strip() for question in re.findall(r"[^?？]*[?？]", text or "") if question.strip()]
+
+
+def compact_message(text: str, max_words: int = 45) -> str:
+    """Normalize and trim one transcript message for the Socratic memory block."""
+    return trim_words(re.sub(r"\s+", " ", text or "").strip(), max_words)
+
+
+def build_socratic_memory() -> str:
+    """
+    Build a compact current-thread note from recent transcript turns.
+
+    This is deliberately rule-based rather than an extra LLM call, so it keeps
+    voice latency predictable while still anchoring follow-up questions.
+    """
+    history = conversation_manager.get_conversation_history(last_n=12)
+    recent_student_points = []
+    recent_tutor_questions = []
+
+    for message in reversed(history):
+        text = (message.get("text") or "").strip()
+        if not text:
+            continue
+
+        if message.get("speaker") == "student":
+            if is_filler_utterance(text):
+                continue
+            recent_student_points.append(compact_message(text, max_words=38))
+        elif message.get("speaker") == "bot":
+            questions = extract_questions(text)
+            for question in reversed(questions):
+                recent_tutor_questions.append(compact_message(question, max_words=32))
+
+        if len(recent_student_points) >= 3 and len(recent_tutor_questions) >= 3:
+            break
+
+    parts = []
+    if recent_student_points:
+        points = list(reversed(recent_student_points[:3]))
+        parts.append("Student's recent defended points: " + " / ".join(points))
+
+    if recent_tutor_questions:
+        questions = list(reversed(recent_tutor_questions[:3]))
+        parts.append("Recent tutor questions already asked: " + " / ".join(questions))
+
+    if not parts:
+        return "No defended student point yet. Start by identifying the central claim the student wants to defend."
+
+    return trim_words(" ".join(parts), SOCRATIC_MEMORY_WORD_LIMIT)
+
+
+def refresh_socratic_memory() -> str:
+    """Refresh in-memory and saved-session Socratic state."""
+    memory = build_socratic_memory()
+    current_session["socratic_memory"] = memory
+    if conversation_manager.pdf_metadata is not None:
+        conversation_manager.pdf_metadata["socratic_memory"] = memory
+    return memory
+
+
+def voice_context() -> str:
+    """Build the compact context sent to Socratic voice models."""
+    paper_anchor = current_session.get("paper_anchor") or trim_words(
+        current_session["pdf_context"],
+        PAPER_ANCHOR_WORD_LIMIT
+    )
+    anchor_source = current_session.get("paper_anchor_source") or "opening"
+    socratic_memory = build_socratic_memory()
+    current_session["socratic_memory"] = socratic_memory
+
+    return (
+        f"Paper anchor ({anchor_source}; stable short context, not the full essay):\n"
+        f"{paper_anchor}\n\n"
+        "Current Socratic thread (use this to continue the same line of inquiry and avoid repeated questions):\n"
+        f"{socratic_memory}"
+    )
+
+
 def session_context_for_mode(mode: str) -> str:
     """Return a mode-appropriate essay context slice for model calls."""
-    words = current_session["pdf_context"].split()
     if mode == "voice":
-        return " ".join(words[:SOCRATIC_CONTEXT_WORD_LIMIT])
+        return voice_context()
     return current_session["pdf_context"]
 
 
@@ -226,7 +544,10 @@ async def generate_bot_response(student_text: str, on_chunk=None) -> str:
             if on_chunk:
                 await on_chunk(chunk)
 
-    return full_response.strip()
+    full_response = full_response.strip()
+    if current_session["mode"] == "voice":
+        return ensure_socratic_question(full_response)
+    return full_response
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -257,6 +578,8 @@ async def health_check():
         "available_models": available_models,
         "recommended_models": RECOMMENDED_OLLAMA_MODELS,
         "default_model": OllamaClient.DEFAULT_MODEL,
+        "default_whisper_model": DEFAULT_WHISPER_MODEL,
+        "supported_whisper_models": sorted(SUPPORTED_WHISPER_MODELS),
         "model_hint": ollama_model_hint(),
         "pdf_uploaded": current_session["pdf_uploaded"],
         "session_active": current_session["session_active"],
@@ -265,7 +588,10 @@ async def health_check():
 
 
 @app.post("/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(
+    file: UploadFile = File(...),
+    ollama_model: Optional[str] = Form(None)
+):
     """
     Handle PDF upload and extract essay context for the pilot.
     """
@@ -295,26 +621,8 @@ async def upload_pdf(file: UploadFile = File(...)):
         if not pdf_context.strip() or context_summary.get("low_confidence_extraction"):
             raise HTTPException(status_code=400, detail=pdf_extraction_error(context_summary))
 
-        pdf_metadata = parser.get_metadata(temp_path)
-
-        # Store in session
-        current_session["pdf_uploaded"] = True
-        current_session["pdf_context"] = pdf_context
-        current_session["pdf_metadata"] = pdf_metadata
-        current_session["session_active"] = False
-        current_session["pdf_metadata"]["filename"] = file.filename
-        current_session["pdf_metadata"]["words_extracted"] = context_summary["words_extracted"]
-        current_session["pdf_metadata"]["total_words"] = context_summary["total_words"]
-        current_session["pdf_metadata"]["word_limit"] = context_summary["word_limit"]
-        current_session["pdf_metadata"]["truncated"] = context_summary["truncated"]
-        current_session["pdf_context_stats"] = context_summary
-
-        return {
-            "success": True,
-            "message": f"PDF processed: {context_summary['words_extracted']} words imported",
-            "metadata": pdf_metadata,
-            "context": context_summary
-        }
+        paper_anchor = choose_paper_anchor(pdf_context, model=ollama_model)
+        return store_processed_pdf(file.filename, temp_path, context_stats, context_summary, paper_anchor)
 
     except HTTPException:
         raise
@@ -327,6 +635,133 @@ async def upload_pdf(file: UploadFile = File(...)):
             os.remove(temp_path)
 
 
+@app.post("/upload-pdf/stream")
+async def upload_pdf_stream(
+    file: UploadFile = File(...),
+    ollama_model: Optional[str] = Form(None)
+):
+    """
+    Stream upload processing progress as NDJSON for the browser checklist.
+    """
+    async def events():
+        temp_path = None
+
+        def event(payload: dict) -> str:
+            return json.dumps(payload) + "\n"
+
+        try:
+            if not file.filename.endswith('.pdf'):
+                yield event({"type": "error", "message": "Only PDF files are allowed"})
+                return
+
+            upload_dir = "uploads"
+            os.makedirs(upload_dir, exist_ok=True)
+            temp_path = os.path.join(
+                upload_dir,
+                f"temp_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pdf"
+            )
+
+            yield event({"type": "status", "step": "save", "status": "active", "message": "Saving PDF"})
+            with open(temp_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            yield event({"type": "status", "step": "save", "status": "done", "message": "PDF saved"})
+
+            yield event({"type": "status", "step": "extract", "status": "active", "message": "Extracting readable text"})
+            parser = PDFParser()
+            context_stats = parser.extract_words_with_stats(
+                temp_path,
+                max_words=PDF_CONTEXT_WORD_LIMIT
+            )
+            pdf_context = context_stats["text"]
+            context_summary = public_context_stats(context_stats)
+            if not pdf_context.strip() or context_summary.get("low_confidence_extraction"):
+                yield event({
+                    "type": "error",
+                    "step": "extract",
+                    "message": pdf_extraction_error(context_summary)
+                })
+                return
+            yield event({
+                "type": "status",
+                "step": "extract",
+                "status": "done",
+                "message": f"Extracted {context_summary['words_extracted']} words"
+            })
+
+            yield event({"type": "status", "step": "anchor", "status": "active", "message": "Looking for paper abstract"})
+            detected_anchor = extract_paper_anchor(pdf_context)
+
+            if detected_anchor["source"] == "abstract":
+                paper_anchor = detected_anchor
+                paper_anchor["synthesis_attempted"] = False
+                yield event({
+                    "type": "status",
+                    "step": "anchor",
+                    "status": "done",
+                    "message": f"Detected abstract anchor ({paper_anchor['words']} words)"
+                })
+                yield event({
+                    "type": "status",
+                    "step": "synthesize",
+                    "status": "done",
+                    "message": "Synthesis skipped; abstract found"
+                })
+            else:
+                yield event({
+                    "type": "status",
+                    "step": "anchor",
+                    "status": "done",
+                    "message": "No abstract detected"
+                })
+                yield event({
+                    "type": "status",
+                    "step": "synthesize",
+                    "status": "active",
+                    "message": "Synthesizing short paper anchor"
+                })
+                synthesized_anchor = synthesize_paper_anchor(pdf_context, model=ollama_model)
+                if synthesized_anchor.get("text"):
+                    paper_anchor = synthesized_anchor
+                    paper_anchor["synthesis_attempted"] = True
+                    paper_anchor["fallback_anchor_source"] = detected_anchor["source"]
+                    yield event({
+                        "type": "status",
+                        "step": "synthesize",
+                        "status": "done",
+                        "message": f"Synthesized paper anchor ({paper_anchor['words']} words)"
+                    })
+                else:
+                    paper_anchor = detected_anchor
+                    paper_anchor["synthesis_attempted"] = True
+                    paper_anchor["synthesis_error"] = synthesized_anchor.get("error", "Synthesis unavailable")
+                    yield event({
+                        "type": "status",
+                        "step": "synthesize",
+                        "status": "warn",
+                        "message": "Synthesis unavailable; using opening words"
+                    })
+
+            yield event({"type": "status", "step": "ready", "status": "active", "message": "Preparing session state"})
+            response_payload = store_processed_pdf(
+                file.filename,
+                temp_path,
+                context_stats,
+                context_summary,
+                paper_anchor
+            )
+            yield event({"type": "status", "step": "ready", "status": "done", "message": "PDF ready"})
+            yield event({"type": "success", **response_payload})
+
+        except Exception as exc:
+            yield event({"type": "error", "message": f"Error processing PDF: {str(exc)}"})
+
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    return StreamingResponse(events(), media_type="application/x-ndjson")
+
+
 @app.post("/start-session")
 async def start_session(request: SessionStartRequest):
     """
@@ -334,7 +769,7 @@ async def start_session(request: SessionStartRequest):
     """
     mode = normalize_session_mode(request.mode)
     requested_model = normalize_ollama_model(request.ollama_model)
-    whisper_model = request.whisper_model
+    whisper_model = normalize_whisper_model(request.whisper_model)
     phrase_timeout = request.phrase_timeout
 
     print(
@@ -366,6 +801,9 @@ async def start_session(request: SessionStartRequest):
         session_metadata = dict(current_session["pdf_metadata"])
         session_metadata["mode"] = mode
         session_metadata["ollama_model"] = requested_model
+        session_metadata["paper_anchor_source"] = current_session["paper_anchor_source"]
+        session_metadata["paper_anchor_words"] = len(current_session["paper_anchor"].split())
+        session_metadata["paper_anchor"] = current_session["paper_anchor"]
         session_id = conversation_manager.start_session(
             pdf_context=current_session["pdf_context"],
             pdf_metadata=session_metadata
@@ -382,6 +820,8 @@ async def start_session(request: SessionStartRequest):
 
         # Add to conversation
         conversation_manager.add_message('bot', bot_message)
+        if mode == "voice":
+            refresh_socratic_memory()
 
         if mode == "voice":
             # Initialize Whisper STT with user-specified timeout from slider
@@ -624,8 +1064,10 @@ async def websocket_conversation(websocket: WebSocket):
                     pause_voice_recording()
                     text = result['text']
 
-                    # Skip empty phrases
-                    if not text.strip():
+                    # Skip empty or filler-only phrases so "um/emm" does not trigger a model turn.
+                    if not text.strip() or is_filler_utterance(text):
+                        if is_filler_utterance(text):
+                            await websocket.send_json({"type": "discard_transcription"})
                         await websocket.send_json({"type": "status", "status": "listening"})
                         current_student_text = ""
                         last_pausing_time = None
@@ -675,6 +1117,18 @@ async def websocket_conversation(websocket: WebSocket):
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         })
 
+                    clean_response = full_response.strip()
+                    final_response = ensure_socratic_question(clean_response)
+                    if final_response != clean_response:
+                        extra_chunk = final_response[len(clean_response):] if final_response.startswith(clean_response) else final_response
+                        if extra_chunk:
+                            await websocket.send_json({
+                                "type": "bot_response_chunk",
+                                "chunk": extra_chunk,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                    full_response = final_response
+
                     # Send completion signal
                     await websocket.send_json({
                         "type": "bot_response_complete",
@@ -691,6 +1145,7 @@ async def websocket_conversation(websocket: WebSocket):
 
                     # Add bot response to conversation
                     conversation_manager.add_message('bot', full_response)
+                    refresh_socratic_memory()
 
                     # Return to listening status
                     await websocket.send_json({"type": "status", "status": "listening"})
@@ -803,7 +1258,7 @@ if __name__ == "__main__":
     # Check Ollama connection
     print("\nChecking Ollama connection...")
     if ollama_client.check_connection():
-        print("✓ Ollama is running (llama3.1:latest)")
+        print(f"✓ Ollama is running ({ollama_client.model})")
     else:
         print("✗ WARNING: Ollama is not running!")
         print("  Start it with: ollama serve")

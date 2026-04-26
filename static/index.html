@@ -175,6 +175,82 @@
             font-size: 14px;
         }
 
+        .upload-checklist {
+            display: none;
+            margin: 18px 0 24px;
+            text-align: left;
+        }
+
+        .upload-checklist.visible {
+            display: block;
+        }
+
+        .upload-step {
+            align-items: center;
+            color: #777;
+            display: flex;
+            font-size: 13px;
+            gap: 8px;
+            padding: 5px 0;
+        }
+
+        .upload-step::before {
+            align-items: center;
+            border: 1px solid #ccd1df;
+            border-radius: 50%;
+            color: #8b93a7;
+            content: "";
+            display: inline-flex;
+            flex: 0 0 auto;
+            font-size: 10px;
+            height: 16px;
+            justify-content: center;
+            width: 16px;
+        }
+
+        .upload-step.active {
+            color: #4f5fc8;
+            font-weight: 600;
+        }
+
+        .upload-step.active::before {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.12);
+        }
+
+        .upload-step.done {
+            color: #25824f;
+        }
+
+        .upload-step.done::before {
+            background: #25824f;
+            border-color: #25824f;
+            color: white;
+            content: "✓";
+        }
+
+        .upload-step.warn {
+            color: #8a6500;
+        }
+
+        .upload-step.warn::before {
+            background: #fff8e6;
+            border-color: #d3aa3b;
+            color: #8a6500;
+            content: "!";
+        }
+
+        .upload-step.error {
+            color: #c33;
+        }
+
+        .upload-step.error::before {
+            background: #c33;
+            border-color: #c33;
+            color: white;
+            content: "!";
+        }
+
         .error {
             background: #fee;
             border: 1px solid #fcc;
@@ -362,6 +438,14 @@
             <div class="loading-text" id="loadingText">Processing PDF...</div>
         </div>
 
+        <div class="upload-checklist" id="uploadChecklist" aria-live="polite">
+            <div class="upload-step" data-upload-step="save">Saving uploaded PDF</div>
+            <div class="upload-step" data-upload-step="extract">Extracting readable text</div>
+            <div class="upload-step" data-upload-step="anchor">Finding abstract or opening anchor</div>
+            <div class="upload-step" data-upload-step="synthesize">Synthesizing fallback anchor if needed</div>
+            <div class="upload-step" data-upload-step="ready">Preparing session state</div>
+        </div>
+
         <div class="mode-selector" aria-label="Session mode">
             <label class="mode-option">
                 <input type="radio" name="sessionMode" value="text" checked>
@@ -382,7 +466,20 @@
         </div>
 
         <div class="voice-settings hidden" id="voiceSettings" style="margin-top: 16px; text-align: left;">
-            <label style="color: #666; font-size: 14px; display: block; margin-bottom: 8px;">
+            <label for="whisperModel" style="color: #666; font-size: 14px; display: block; margin-bottom: 8px;">
+                Whisper speech model
+            </label>
+            <select class="model-select" id="whisperModel">
+                <option value="tiny">tiny.en - fastest, least accurate</option>
+                <option value="base">base.en - faster</option>
+                <option value="small" selected>small.en - recommended voice default</option>
+                <option value="medium">medium.en - slower, more accurate</option>
+            </select>
+            <p class="model-hint">
+                Larger Whisper models improve transcription accuracy but are slower and download on first use.
+            </p>
+
+            <label style="color: #666; font-size: 14px; display: block; margin: 14px 0 8px;">
                 Pause detection timeout (seconds):
             </label>
             <input type="range" id="phraseTimeout" min="4" max="10" step="0.5" value="5.0"
@@ -412,6 +509,7 @@
         const startBtn = document.getElementById('startBtn');
         const loading = document.getElementById('loading');
         const loadingText = document.getElementById('loadingText');
+        const uploadChecklist = document.getElementById('uploadChecklist');
         const errorMsg = document.getElementById('errorMsg');
         const successMsg = document.getElementById('successMsg');
         const contextNotice = document.getElementById('contextNotice');
@@ -423,6 +521,7 @@
         const voiceSettings = document.getElementById('voiceSettings');
         const ollamaModel = document.getElementById('ollamaModel');
         const modelHint = document.getElementById('modelHint');
+        const whisperModel = document.getElementById('whisperModel');
 
         let uploadedFile = null;
         let isPdfReady = false;
@@ -430,8 +529,9 @@
         let activeSessionMode = null;
         let isBusy = false;
         let installedModels = [];
-        let recommendedModels = ['gemma4:e4b', 'qwen3:14b', 'gemma3:12b', 'llama3.1:latest'];
-        let preferredModel = 'gemma4:e4b';
+        let recommendedModels = ['qwen3:14b', 'llama3.1:latest', 'gemma4:e4b', 'gemma3:12b'];
+        let preferredModel = 'qwen3:14b';
+        let defaultWhisperModel = 'small';
 
         function selectedMode() {
             return document.querySelector('input[name="sessionMode"]:checked').value;
@@ -447,6 +547,29 @@
 
         function updateStartButton() {
             startBtn.disabled = isBusy || !isPdfReady || !isOllamaReady;
+        }
+
+        function resetUploadChecklist() {
+            uploadChecklist.classList.remove('visible');
+            uploadChecklist.querySelectorAll('.upload-step').forEach((step) => {
+                step.classList.remove('active', 'done', 'warn', 'error');
+                step.dataset.defaultText = step.dataset.defaultText || step.textContent;
+                step.textContent = step.dataset.defaultText;
+            });
+        }
+
+        function setUploadStep(stepName, status, message) {
+            uploadChecklist.classList.add('visible');
+            const step = uploadChecklist.querySelector(`[data-upload-step="${stepName}"]`);
+            if (!step) {
+                return;
+            }
+            step.classList.remove('active', 'done', 'warn', 'error');
+            step.classList.add(status || 'active');
+            if (message) {
+                step.textContent = message;
+                loadingText.textContent = message;
+            }
         }
 
         function isModelInstalled(modelName) {
@@ -523,6 +646,11 @@
                 installedModels = data.available_models || [];
                 recommendedModels = data.recommended_models || recommendedModels;
                 preferredModel = data.default_model || data.ollama_model || preferredModel;
+                defaultWhisperModel = data.default_whisper_model || defaultWhisperModel;
+                if (!whisperModel.dataset.initialized) {
+                    whisperModel.value = defaultWhisperModel;
+                    whisperModel.dataset.initialized = 'true';
+                }
                 renderModelSelector();
 
                 if (data.ollama_connected && isModelInstalled(selectedOllamaModel())) {
@@ -596,6 +724,7 @@
             uploadedFile = null;
             isPdfReady = false;
             updateStartButton();
+            resetUploadChecklist();
             successMsg.classList.remove('visible');
             contextNotice.classList.remove('visible');
             fileInfo.classList.remove('visible');
@@ -630,23 +759,15 @@
 
             const formData = new FormData();
             formData.append('file', file);
+            formData.append('ollama_model', selectedOllamaModel());
 
             try {
-                const response = await fetch('/upload-pdf', {
+                const response = await fetch('/upload-pdf/stream', {
                     method: 'POST',
                     body: formData
                 });
 
-                const data = await response.json();
-
-                if (response.ok) {
-                    isPdfReady = true;
-                    showSuccess(data.message);
-                    showContextNotice(data.context);
-                } else {
-                    isPdfReady = false;
-                    showError(data.detail || 'Error processing PDF');
-                }
+                await readUploadStream(response);
             } catch (error) {
                 isPdfReady = false;
                 showError('Failed to upload PDF: ' + error.message);
@@ -657,14 +778,83 @@
             }
         }
 
+        async function readUploadStream(response) {
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.detail || 'Error processing PDF');
+            }
+
+            if (!response.body) {
+                const data = await response.json();
+                if (!data.success) {
+                    throw new Error(data.detail || data.message || 'Error processing PDF');
+                }
+                isPdfReady = true;
+                showSuccess(data.message);
+                showContextNotice(data.context);
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const {value, done} = await reader.read();
+                if (done) {
+                    break;
+                }
+
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    handleUploadEvent(line);
+                }
+            }
+
+            if (buffer.trim()) {
+                handleUploadEvent(buffer);
+            }
+        }
+
+        function handleUploadEvent(line) {
+            if (!line.trim()) {
+                return;
+            }
+
+            const data = JSON.parse(line);
+            if (data.type === 'status') {
+                setUploadStep(data.step, data.status, data.message);
+                return;
+            }
+
+            if (data.type === 'success') {
+                isPdfReady = true;
+                showSuccess(data.message);
+                showContextNotice(data.context);
+                updateStartButton();
+                return;
+            }
+
+            if (data.type === 'error') {
+                if (data.step) {
+                    setUploadStep(data.step, 'error', data.message);
+                }
+                throw new Error(data.message || 'Error processing PDF');
+            }
+        }
+
         // Start session
         startBtn.addEventListener('click', async () => {
             loading.classList.add('visible');
             isBusy = true;
             updateStartButton();
             const mode = selectedMode();
+            const selectedWhisperModel = whisperModel.value || defaultWhisperModel;
             loadingText.textContent = mode === 'voice'
-                ? 'Initializing Whisper model and session...'
+                ? `Initializing Whisper ${selectedWhisperModel}.en and session...`
                 : 'Starting text chat session...';
             errorMsg.classList.remove('visible');
 
@@ -678,7 +868,7 @@
                     body: JSON.stringify({
                         mode: mode,
                         ollama_model: model,
-                        whisper_model: 'base',
+                        whisper_model: selectedWhisperModel,
                         phrase_timeout: phraseTimeout
                     })
                 });
@@ -728,6 +918,24 @@
 
             if (context.extraction_method === 'ocr') {
                 contextNotice.textContent = 'Imported using OCR because the PDF did not expose normal selectable text.';
+                contextNotice.classList.add('visible');
+                return;
+            }
+
+            if (context.extraction_errors && context.extraction_errors.length) {
+                contextNotice.textContent = `Imported with ${context.extraction_method}; one parser path failed but another recovered the text.`;
+                contextNotice.classList.add('visible');
+                return;
+            }
+
+            if (context.paper_anchor_words) {
+                const source = context.paper_anchor_source === 'synthetic_abstract'
+                    ? 'synthetic abstract'
+                    : (context.paper_anchor_source === 'abstract' ? 'abstract' : 'opening');
+                const fallbackNote = context.paper_anchor_synthesis_error
+                    ? ' Synthesis was unavailable, so the opening text will be used.'
+                    : '';
+                contextNotice.textContent = `Voice mode will use a ${context.paper_anchor_words}-word ${source} anchor plus recent conversation memory.${fallbackNote}`;
                 contextNotice.classList.add('visible');
                 return;
             }

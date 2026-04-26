@@ -33,13 +33,19 @@ class PDFParser:
         """
         try:
             text_candidates = []
+            extraction_errors = []
 
-            pypdf_text = PDFParser._extract_text_with_pypdf2(pdf_path)
-            text_candidates.append(("pypdf2", pypdf_text))
-
-            pdftotext_text = PDFParser._extract_text_with_pdftotext(pdf_path)
-            if pdftotext_text:
-                text_candidates.append(("pdftotext", pdftotext_text))
+            for method, extractor in (
+                ("pypdf2", PDFParser._extract_text_with_pypdf2),
+                ("pymupdf", PDFParser._extract_text_with_pymupdf),
+                ("pdftotext", PDFParser._extract_text_with_pdftotext),
+            ):
+                try:
+                    extracted_text = extractor(pdf_path)
+                    if extracted_text:
+                        text_candidates.append((method, extracted_text))
+                except Exception as exc:
+                    extraction_errors.append(f"{method}: {str(exc)}")
 
             method, cleaned_text, raw_text = PDFParser._best_text_candidate(text_candidates)
             boilerplate_detected = PDFParser._has_viewer_boilerplate(raw_text)
@@ -69,6 +75,7 @@ class PDFParser:
                 "boilerplate_detected": boilerplate_detected,
                 "ocr_attempted": ocr_attempted,
                 "ocr_available": ocr_available,
+                "extraction_errors": extraction_errors,
                 "low_confidence_extraction": PDFParser._low_confidence(cleaned_text, raw_text)
             }
 
@@ -81,7 +88,42 @@ class PDFParser:
     def _extract_text_with_pypdf2(pdf_path: str) -> str:
         with open(pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
-            return "\n".join((page.extract_text() or "") for page in pdf_reader.pages)
+            page_texts = []
+            failed_pages = 0
+            for page in pdf_reader.pages:
+                try:
+                    page_texts.append(page.extract_text() or "")
+                except Exception:
+                    failed_pages += 1
+
+            if failed_pages and not any(text.strip() for text in page_texts):
+                raise ValueError(f"PyPDF2 could not extract text from {failed_pages} page(s)")
+
+            return "\n".join(page_texts)
+
+    @staticmethod
+    def _extract_text_with_pymupdf(pdf_path: str) -> str:
+        try:
+            import fitz
+        except ImportError:
+            return ""
+
+        page_texts = []
+        failed_pages = 0
+        document = fitz.open(pdf_path)
+        try:
+            for page in document:
+                try:
+                    page_texts.append(page.get_text("text") or "")
+                except Exception:
+                    failed_pages += 1
+        finally:
+            document.close()
+
+        if failed_pages and not any(text.strip() for text in page_texts):
+            raise ValueError(f"PyMuPDF could not extract text from {failed_pages} page(s)")
+
+        return "\n".join(page_texts)
 
     @staticmethod
     def _extract_text_with_pdftotext(pdf_path: str) -> str:

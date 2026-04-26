@@ -19,7 +19,7 @@ class WhisperSTT:
 
     def __init__(
         self,
-        model: str = "base",
+        model: str = "small",
         non_english: bool = False,
         energy_threshold: int = 1000,
         record_timeout: float = 2,
@@ -369,7 +369,7 @@ if __name__ == "__main__":
     for idx, name in WhisperSTT.list_microphones():
         print(f"  [{idx}] {name}")
 
-    print("\nInitializing Whisper STT (base model)...")
+    print("\nInitializing Whisper STT (small model)...")
 
     def on_transcription(data):
         if data['pausing']:
@@ -381,7 +381,7 @@ if __name__ == "__main__":
         print(f"\n✓ COMPLETE: '{data['text']}'")
 
     stt = WhisperSTT(
-        model="base",
+        model="small",
         phrase_timeout=3.0,
         record_timeout=2.0,
         debug=True

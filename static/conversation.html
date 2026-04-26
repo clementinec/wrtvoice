@@ -464,6 +464,12 @@
             if (context.truncated) {
                 details.push(`first ${context.word_limit} words only`);
             }
+            if (context.paper_anchor_words) {
+                const source = context.paper_anchor_source === 'synthetic_abstract'
+                    ? 'synthetic abstract'
+                    : (context.paper_anchor_source === 'abstract' ? 'abstract' : 'opening');
+                details.push(`${source} anchor ${context.paper_anchor_words} words`);
+            }
             if (state.ollama_model) {
                 details.push(state.ollama_model);
             }
@@ -538,6 +544,10 @@
 
                 case 'transcription':
                     handleTranscription(data);
+                    break;
+
+                case 'discard_transcription':
+                    discardCurrentTranscription();
                     break;
 
                 case 'bot_response_chunk':
@@ -640,6 +650,15 @@
 
             // Auto-scroll
             chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function discardCurrentTranscription() {
+            if (currentTranscription) {
+                currentTranscription.remove();
+                currentTranscription = null;
+            }
+            statusText.textContent = 'Listening...';
+            thinkingIndicator.classList.remove('visible');
         }
 
         // Handle bot response (legacy non-streaming)

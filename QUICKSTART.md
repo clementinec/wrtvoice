@@ -3,7 +3,7 @@
 ## Prerequisites Check
 
 ✅ **Ollama installed**: `/usr/local/bin/ollama`
-✅ **Ollama model available**: `gemma4:e4b` preferred, `qwen3:14b` recommended for stronger tutoring
+✅ **Ollama model available**: `qwen3:14b` preferred for stronger tutoring, `llama3.1` useful as the faster fallback
 ✅ **Whisper/PyAudio**: Optional; only needed for voice mode
 
 ## Installation (One-time)
@@ -56,14 +56,16 @@ starting a session.
 
 3. **Start Session**:
    - Choose Text editing for typed revision help, or Voice for microphone practice
+   - Voice defaults to Whisper `small.en`; choose `base.en` or `tiny.en` if you want faster transcription
    - Click "Start Session" button
    - Text mode starts immediately once Ollama is ready
-   - Voice mode loads Whisper first (one-time, ~30 seconds)
+   - Voice mode preloads Whisper on startup; first use may download the selected model
 
 4. **Engage in Dialogue**:
    - In text mode, type an editing request or use a prompt button
    - In voice mode, speak into the server machine microphone
    - After the configured pause timeout, the bot responds in the chat
+   - Voice mode uses the detected abstract, a synthesized fallback anchor, or the opening text plus recent thread memory to keep follow-ups grounded
 
 5. **End Session**:
    - Click "End Session" when done
@@ -97,7 +99,7 @@ ollama serve
 ```
 
 ### Whisper model not found
-First run downloads models automatically (base ≈ 150MB)
+First run downloads models automatically (`small.en` is the default; `base.en` is faster and smaller).
 
 ### Microphone not working
 ```bash
@@ -115,12 +117,11 @@ pip install --upgrade pyaudio
 
 ### Change Whisper Model (Speed vs Quality)
 
-In `app.py`, modify line 140:
-```python
-model="tiny"    # Fastest, lower quality
-model="base"    # Recommended (default)
-model="small"   # Better quality, slower
-model="medium"  # High quality, much slower
+Choose the Whisper model on the upload page before starting a voice session, or set:
+
+```bash
+WHISPER_MODEL=base ./start_bot.sh
+PRELOAD_WHISPER_MODEL=0 ./start_bot.sh
 ```
 
 ### Adjust Phrase Detection Timeout

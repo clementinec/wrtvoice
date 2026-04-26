@@ -146,9 +146,11 @@ brew install ollama
 
 ### Whisper model download is slow
 
-**First run**: Whisper downloads models (~150MB for "base")
+**First run**: Whisper downloads models (`small.en` is the voice default; `base.en` is faster and smaller)
 - Models are cached in `~/.cache/whisper/`
 - Subsequent runs are instant
+- Use `WHISPER_MODEL=base ./start_bot.sh` to trade some accuracy for speed
+- Use `PRELOAD_WHISPER_MODEL=0 ./start_bot.sh` to skip startup preload
 
 ## Verify Everything Works
 
