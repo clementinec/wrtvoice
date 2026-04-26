@@ -1,9 +1,9 @@
-# Quick Start Guide - Socratic Method Bot
+# Quick Start Guide - Socratic Oracle
 
 ## Prerequisites Check
 
 ✅ **Ollama installed**: `/usr/local/bin/ollama`
-✅ **Ollama model available**: `qwen3:14b` preferred for stronger tutoring, `llama3.1` useful as the faster fallback
+✅ **Ollama model available**: `qwen3:14b` preferred for stronger Socratic questioning, `llama3.1` useful as the faster fallback
 ✅ **Whisper/PyAudio**: Optional; only needed for voice mode
 
 ## Installation (One-time)
@@ -51,21 +51,21 @@ starting a session.
 1. **Open Browser**: Navigate to `http://localhost:8000`
 
 2. **Upload PDF**:
-   - Click the upload area or drag & drop your essay PDF
+   - Click the upload area or drag & drop your writeup PDF
    - Up to the first 5,000 words are automatically extracted
 
 3. **Start Session**:
-   - Choose Text editing for typed revision help, or Voice for microphone practice
+   - Choose Text workspace for typed revision help, or Socratic Oracle for verbal understanding
    - Voice defaults to Whisper `small.en`; choose `base.en` or `tiny.en` if you want faster transcription
    - Click "Start Session" button
    - Text mode starts immediately once Ollama is ready
-   - Voice mode preloads Whisper on startup; first use may download the selected model
+   - Socratic Oracle mode preloads Whisper on startup; first use may download the selected model
 
 4. **Engage in Dialogue**:
    - In text mode, type an editing request or use a prompt button
-   - In voice mode, speak into the server machine microphone
+   - In Socratic Oracle mode, speak into the server machine microphone
    - After the configured pause timeout, the bot responds in the chat
-   - Voice mode uses the detected abstract, a synthesized fallback anchor, or the opening text plus recent thread memory to keep follow-ups grounded
+   - Socratic Oracle uses the detected abstract, a synthesized fallback anchor, or the opening text plus recent thread memory to keep follow-ups grounded
 
 5. **End Session**:
    - Click "End Session" when done

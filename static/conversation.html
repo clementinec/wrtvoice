@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Socratic Dialogue - Active Session</title>
+    <title>Socratic Oracle - Active Session</title>
     <style>
         * {
             margin: 0;
@@ -346,7 +346,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1 id="sessionTitle">Socratic Dialogue Session</h1>
+            <h1 id="sessionTitle">Socratic Oracle Session</h1>
             <p class="session-meta" id="sessionMeta"></p>
             <div class="status-bar">
                 <div class="status-indicator">
@@ -389,7 +389,7 @@
                 </div>
                 <form class="text-form" id="textForm">
                     <textarea class="message-input" id="messageInput" rows="3"
-                              placeholder="Type your answer or defense here..."></textarea>
+                              placeholder="Type your response here..."></textarea>
                     <button class="btn" id="sendBtn" type="submit">Send</button>
                 </form>
             </div>
@@ -481,7 +481,7 @@
         }
 
         function enableVoiceMode() {
-            sessionTitle.textContent = 'Socratic Dialogue Session';
+            sessionTitle.textContent = 'Socratic Oracle Session';
             voiceControls.classList.remove('hidden');
             textControls.classList.remove('visible');
             statusText.textContent = 'Connecting...';
@@ -741,7 +741,7 @@
         }
 
         function botLabel() {
-            return sessionMode === 'text' ? '🤖 Essay Assistant' : '🤖 Socratic Tutor';
+            return sessionMode === 'text' ? '🤖 Essay Assistant' : '🤖 Socratic Oracle';
         }
 
         function escapeHtml(text) {

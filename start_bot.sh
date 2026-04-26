@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "=========================================="
-echo "  Socratic Method Bot - Startup Script"
+echo "  Socratic Oracle - Startup Script"
 echo "=========================================="
 echo ""
 

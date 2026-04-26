@@ -1,6 +1,6 @@
 """
-Socratic Method Bot - Main Application
-FastAPI server for real-time transcription and Socratic dialogue.
+Socratic Oracle - Main Application
+FastAPI server for real-time transcription and question-led writeup reflection.
 """
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
@@ -42,7 +42,7 @@ class MessageRequest(BaseModel):
     text: str
 
 
-app = FastAPI(title="Socratic Method Bot")
+app = FastAPI(title="Socratic Oracle")
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -230,7 +230,7 @@ def synthesize_paper_anchor(pdf_context: str, model: Optional[str] = None) -> di
         {
             "role": "system",
             "content": (
-                "Create a compact paper anchor for a Socratic tutor. "
+                "Create a compact paper anchor for Socratic Oracle, a question-led interface for developing verbal understanding of a student's writeup. "
                 "Use only the provided paper text. Do not invent sources, claims, authors, data, or conclusions. "
                 "Write 120-220 words in plain prose, no heading, no bullets, no markdown. "
                 "Capture the central claim, scope, evidence base, and stakes if present."
@@ -418,7 +418,7 @@ def ensure_socratic_question(response_text: str) -> str:
 
     return (
         f"{text} "
-        "What evidence from your paper would you use to defend that point?"
+        "What evidence from your writeup would you use to explain that point?"
     )
 
 
@@ -441,7 +441,7 @@ def build_socratic_memory() -> str:
     """
     history = conversation_manager.get_conversation_history(last_n=12)
     recent_student_points = []
-    recent_tutor_questions = []
+    recent_oracle_questions = []
 
     for message in reversed(history):
         text = (message.get("text") or "").strip()
@@ -455,22 +455,22 @@ def build_socratic_memory() -> str:
         elif message.get("speaker") == "bot":
             questions = extract_questions(text)
             for question in reversed(questions):
-                recent_tutor_questions.append(compact_message(question, max_words=32))
+                recent_oracle_questions.append(compact_message(question, max_words=32))
 
-        if len(recent_student_points) >= 3 and len(recent_tutor_questions) >= 3:
+        if len(recent_student_points) >= 3 and len(recent_oracle_questions) >= 3:
             break
 
     parts = []
     if recent_student_points:
         points = list(reversed(recent_student_points[:3]))
-        parts.append("Student's recent defended points: " + " / ".join(points))
+        parts.append("Student's recent articulated points: " + " / ".join(points))
 
-    if recent_tutor_questions:
-        questions = list(reversed(recent_tutor_questions[:3]))
-        parts.append("Recent tutor questions already asked: " + " / ".join(questions))
+    if recent_oracle_questions:
+        questions = list(reversed(recent_oracle_questions[:3]))
+        parts.append("Recent Oracle questions already asked: " + " / ".join(questions))
 
     if not parts:
-        return "No defended student point yet. Start by identifying the central claim the student wants to defend."
+        return "No student point has been articulated yet. Start by identifying the central claim the student wants to understand verbally."
 
     return trim_words(" ".join(parts), SOCRATIC_MEMORY_WORD_LIMIT)
 
@@ -1252,7 +1252,7 @@ async def list_microphones():
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("Socratic Method Bot - Starting Server")
+    print("Socratic Oracle - Starting Server")
     print("=" * 70)
 
     # Check Ollama connection

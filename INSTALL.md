@@ -8,7 +8,7 @@ Text mode only, recommended for first testing:
 ./install_dependencies.sh
 ```
 
-Voice mode, including Whisper and PyAudio:
+Socratic Oracle voice mode, including Whisper and PyAudio:
 
 ```bash
 ./install_dependencies.sh --voice

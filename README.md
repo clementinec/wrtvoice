@@ -1,14 +1,14 @@
-# Socratic Method Bot
+# Socratic Oracle
 
-A local FastAPI app for working on essays with an LLM. The default interface is
-typed essay editing; voice mode is still available for Socratic defense practice
-when Whisper and local audio dependencies are installed.
+A local FastAPI app for developing verbal understanding of a writeup through
+guided Socratic questions. A typed text workspace is also available for routine
+revision tasks.
 
 ## Features
 
 - PDF upload with up to 5,000 words imported for the current pilot.
 - Text editing mode with no microphone or Whisper dependency.
-- Optional voice mode using local Whisper speech-to-text.
+- Optional Socratic Oracle voice mode using local Whisper speech-to-text.
 - Local Ollama/LLaMA response generation.
 - Streaming bot responses in voice mode.
 - Session persistence to JSON and text exports in `conversations/`.
@@ -33,7 +33,7 @@ For scanned PDFs or PDFs printed from a browser viewer, install OCR support:
 brew install tesseract
 ```
 
-Voice mode also requires the audio/Whisper stack:
+Socratic Oracle voice mode also requires the audio/Whisper stack:
 
 ```bash
 ./install_dependencies.sh --voice
@@ -62,7 +62,7 @@ export OLLAMA_MODEL=qwen3:14b
 export OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
-Voice mode defaults to Whisper `small.en` for better transcription. The first
+Socratic Oracle voice mode defaults to Whisper `small.en` for better transcription. The first
 startup preloads it and may download the model once. To choose a faster model or
 skip preload:
 
@@ -71,7 +71,7 @@ export WHISPER_MODEL=base
 export PRELOAD_WHISPER_MODEL=0
 ```
 
-For voice/Socratic sessions, the model prompt uses a compact paper anchor
+For Socratic Oracle sessions, the model prompt uses a compact paper anchor
 (detected Abstract when available, otherwise a synthesized abstract-like anchor
 when Ollama is available, otherwise the opening words) plus recent conversation
 memory. Text editing mode still uses the fuller imported essay excerpt for
@@ -91,12 +91,12 @@ http://localhost:8000
 
 ## Usage
 
-1. Upload a PDF essay.
-2. Choose `Text editing` or `Voice`.
+1. Upload a PDF writeup.
+2. Choose `Text workspace` or `Socratic Oracle`.
 3. Start the session.
 4. In text mode, ask for routine essay help such as thesis revision, structure,
    clarity edits, paragraph rewrites, or feedback.
-5. In voice mode, answer the tutor's Socratic questions.
+5. In Socratic Oracle mode, answer question-led prompts to develop verbal understanding of your writeup.
 6. End the session to save JSON and text exports.
 
 For the current pilot, essays under 5,000 words are imported directly. Longer

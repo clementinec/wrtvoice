@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Socratic Method Bot - Upload Essay</title>
+    <title>Socratic Oracle - Upload Writeup</title>
     <style>
         * {
             margin: 0;
@@ -413,8 +413,8 @@
 </head>
 <body>
     <div class="container">
-        <h1>Socratic Method Bot</h1>
-        <p class="subtitle">Upload your essay to edit, revise, or practice defending it</p>
+        <h1>Socratic Oracle</h1>
+        <p class="subtitle">Develop verbal understanding of your writeup through guided questions</p>
 
         <div class="error" id="errorMsg"></div>
         <div class="success" id="successMsg"></div>
@@ -422,7 +422,7 @@
 
         <div class="upload-area" id="uploadArea">
             <div class="upload-icon">📄</div>
-            <div class="upload-text">Click to upload or drag & drop your essay</div>
+            <div class="upload-text">Click to upload or drag & drop your writeup</div>
             <div class="upload-hint">PDF files only, max 10MB</div>
         </div>
 
@@ -449,13 +449,13 @@
         <div class="mode-selector" aria-label="Session mode">
             <label class="mode-option">
                 <input type="radio" name="sessionMode" value="text" checked>
-                <span class="mode-title">Text editing</span>
+                <span class="mode-title">Text workspace</span>
                 <span class="mode-hint">Ask for revisions, structure, clarity, or feedback.</span>
             </label>
             <label class="mode-option">
                 <input type="radio" name="sessionMode" value="voice">
-                <span class="mode-title">Voice</span>
-                <span class="mode-hint">Uses the server machine microphone.</span>
+                <span class="mode-title">Socratic Oracle</span>
+                <span class="mode-hint">Develop verbal understanding using the server machine microphone.</span>
             </label>
         </div>
 
@@ -910,7 +910,7 @@
             }
 
             if (context.truncated) {
-                contextNotice.textContent = `Pilot note: this essay appears to be ${context.total_words} words. `
+                contextNotice.textContent = `Pilot note: this writeup appears to be ${context.total_words} words. `
                     + `For the current pilot, the assistant will work with the first ${context.word_limit} words.`;
                 contextNotice.classList.add('visible');
                 return;
@@ -935,7 +935,7 @@
                 const fallbackNote = context.paper_anchor_synthesis_error
                     ? ' Synthesis was unavailable, so the opening text will be used.'
                     : '';
-                contextNotice.textContent = `Voice mode will use a ${context.paper_anchor_words}-word ${source} anchor plus recent conversation memory.${fallbackNote}`;
+                contextNotice.textContent = `Socratic Oracle will use a ${context.paper_anchor_words}-word ${source} anchor plus recent conversation memory.${fallbackNote}`;
                 contextNotice.classList.add('visible');
                 return;
             }
