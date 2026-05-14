@@ -596,7 +596,7 @@ async def upload_pdf(
     Handle PDF upload and extract essay context for the pilot.
     """
     # Validate file type
-    if not file.filename.endswith('.pdf'):
+    if not (file.filename or "").lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
 
     # Save uploaded file temporarily
@@ -643,6 +643,10 @@ async def upload_pdf_stream(
     """
     Stream upload processing progress as NDJSON for the browser checklist.
     """
+    filename = file.filename or ""
+    uploaded_pdf = await file.read()
+    await file.close()
+
     async def events():
         temp_path = None
 
@@ -650,7 +654,7 @@ async def upload_pdf_stream(
             return json.dumps(payload) + "\n"
 
         try:
-            if not file.filename.endswith('.pdf'):
+            if not filename.lower().endswith('.pdf'):
                 yield event({"type": "error", "message": "Only PDF files are allowed"})
                 return
 
@@ -663,7 +667,7 @@ async def upload_pdf_stream(
 
             yield event({"type": "status", "step": "save", "status": "active", "message": "Saving PDF"})
             with open(temp_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+                buffer.write(uploaded_pdf)
             yield event({"type": "status", "step": "save", "status": "done", "message": "PDF saved"})
 
             yield event({"type": "status", "step": "extract", "status": "active", "message": "Extracting readable text"})
@@ -743,7 +747,7 @@ async def upload_pdf_stream(
 
             yield event({"type": "status", "step": "ready", "status": "active", "message": "Preparing session state"})
             response_payload = store_processed_pdf(
-                file.filename,
+                filename,
                 temp_path,
                 context_stats,
                 context_summary,

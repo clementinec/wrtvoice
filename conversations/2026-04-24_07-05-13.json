@@ -1,0 +1,42 @@
+{
+  "session_id": "2026-04-24_07-05-13",
+  "session_start": "2026-04-24T07:05:13.350993+00:00",
+  "session_duration_seconds": 105.852122,
+  "pdf_context": "F riction by Design: A Socratic AI Interface for Articulating Design Reasoning in the Age of Generative T ext Anonymous submission Abstract Generative AI has made writing nearly frictionless, yet design reasoning in architecture is forged precisely through friction—the crit, the jury , the viva. When an AI drafts a design rationale, the cognitive work of articulating intent, weighing alternatives, and defending choices is offloaded along with the prose. This paper argues that the resulting crisis is not one of academic integrity but of interface design : current AI writing tools are designed to minimize effort, even when the effort itself is where learning happens. W e present an anonymized prototype AI writing interface whose primary design material is friction —staged prompts that require writers to articulate goals, self-explain revisions, and defend choices before assistance is rendered. Drawing on architectural phenomenology , writing-process theory , HCI work on reflective interaction, and recent studies of AI-assisted writing, we frame friction not as a defect to be eliminated but as a designable quality of computational systems. A small formative design evaluation with architecture postgraduates (n=3–5) is structured to compare this prototype with participants’ own existing workflows and to examine how interface topology shapes ownership, revision strategy , and verbal defensibility . The paper contributes a research-through-design account of friction by design as a transferable principle for AI interfaces used in learning. 1 Introduction The arrival of large language models capable of generating fluent, discipline-appropriate prose has triggered widespread concern in higher education about authorship, assessment integrity , and the future of student writing. Architecture has not been immune: a student can now prompt an AI to produce a passable design rationale—complete with references to phenomenology , tectonics, or critical regionalism—in seconds. The dominant institutional response has oscillated between prohibition (banning AI tools) and detection (deploying similarity checkers), neither of which addresses the deeper question: what cognitive work disappears when writing becomes frictionless? W e argue that architecture pedagogy is uniquely positioned to reframe this question, because the discipline has always understood friction as epistemologically productive. The studio crit, the thesis defense, the design jury—these are not obstacles to knowledge transmission but the sites where architectural knowledge is produced and tested . A student who cannot articulate why they chose a particular structural expression, spatial sequence, or material palette has not yet understood their own design. The friction of articulation is the learning. Current AI writing interfaces are designed according to the dominant logic of human-computer interaction: minimize friction, maximize throughput, reduce cognitive load. This is the right design for productivity tools. It is precisely the wrong design for learning tools, where cognitive load is not overhead but the point . The crisis precipitated by GenAI in design education is therefore not primarily an integrity crisis—it is an interface design crisis . The tools are designed to remove the very friction that produces understanding. Recent work in computational design reinforces the claim that interface topology changes what kinds of participation become possible. In",
+  "pdf_metadata": {
+    "title": "Friction by Design: A Socratic AI Interface for Articulating Design Reasoning in the Age of Generative Text",
+    "author": "Anonymous submission",
+    "pages": 9,
+    "filename": "ACADIA2026_Friction_by_Design.pdf"
+  },
+  "conversation": [
+    {
+      "timestamp": "2026-04-24T07:05:27.915028+00:00",
+      "speaker": "bot",
+      "text": "\"Thank you for sharing your thought-provoking essay on the role of friction in design education. I'd love to hear you articulate your main thesis in your own words: what is the core claim you're making about the relationship between AI, interface design, and learning?\""
+    },
+    {
+      "timestamp": "2026-04-24T07:06:25.488592+00:00",
+      "speaker": "student",
+      "text": "I'd say I argue the text transaction (comms) mode is different than verbal"
+    },
+    {
+      "timestamp": "2026-04-24T07:06:28.188960+00:00",
+      "speaker": "bot",
+      "text": "That's an interesting distinction. But isn't that a bit of a non-sequitur? You started by saying you're making a claim about AI, interface design, and learning, but now you seem to be talking about modes of communication. Can you explain why the difference between text transaction mode and verbal mode is relevant to your argument about friction in design education?"
+    },
+    {
+      "timestamp": "2026-04-24T07:06:57.330136+00:00",
+      "speaker": "student",
+      "text": "It's about how students learn and people communicate via different modes of communication?"
+    },
+    {
+      "timestamp": "2026-04-24T07:06:59.203035+00:00",
+      "speaker": "bot",
+      "text": "That's a start, but I'd like to press further. You mentioned \"modes of communication\" as the reason why text transaction mode is relevant to your argument. But isn't that a bit too broad? How does this relate specifically to the concept of friction in design education, which you introduced earlier? What about AI writing interfaces? How do they fit into this picture of different modes of communication?"
+    }
+  ],
+  "message_count": 5,
+  "student_messages": 2,
+  "bot_messages": 3
+}
